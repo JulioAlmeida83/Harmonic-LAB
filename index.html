@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Harmonic Lab — Intervalos & Escalas</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <h1>Harmonic Lab</h1>
+      <p class="tagline">Tônica, escala, acorde de referência e 8 slots — som imediato.</p>
+    </div>
+    <button type="button" id="btnAudio" class="btn btn-primary">Ativar áudio</button>
+  </header>
+
+  <section class="panel panel-context" aria-label="Contexto tonal">
+    <div class="row">
+      <label class="field">
+        <span>Tônica</span>
+        <select id="tonic"></select>
+      </label>
+      <label class="field field-check">
+        <input type="checkbox" id="preferFlats" />
+        <span>Preferir bemóis</span>
+      </label>
+      <input type="hidden" id="soundMode" value="sample" />
+    </div>
+    <div class="row row-samples">
+      <label class="field">
+        <span>Instrumento (banco)</span>
+        <select id="bankInstrument" disabled title="Ativo em modo Amostras">
+          <option value="internal">Som interno</option>
+          <option value="piano">Piano de cauda (grand)</option>
+          <option value="rhodes">Rhodes / E-piano</option>
+          <option value="cello">Violoncelo</option>
+          <option value="acoustic_bass">Contrabaixo acústico</option>
+          <option value="jazz_bass">Baixo elétrico (Jazz / precisão)</option>
+          <option value="acoustic_guitar">Guitarra acústica</option>
+          <option value="fender_guitar">Guitarra elétrica (limpa)</option>
+          <option value="guitar_distorted">Guitarra com distorção</option>
+          <option value="clarinet">Clarinete</option>
+          <option value="native_flute">Flauta (transversal; EQ suave)</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Execução</span>
+        <select id="playStyle" title="Articulação das notas do instrumento">
+          <option value="pluck">Pizzicato / Pluck</option>
+          <option value="sustain" selected>Contínuo / Sustain</option>
+          <option value="arpeggio">Arpejo (1 slot / batida)</option>
+          <option value="arpeggio_full">Arpejo completo (todas as notas do acorde do slot)</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>BPM global</span>
+        <input type="number" id="globalBpm" min="40" max="220" value="96" />
+      </label>
+      <label class="field">
+        <span>Ganho saída</span>
+        <input
+          type="range"
+          id="masterGain"
+          min="0"
+          max="200"
+          value="100"
+          title="Percentagem do volume nominal geral (100% = padrão). Valores altos podem saturar."
+        />
+      </label>
+    </div>
+    <div class="row row-harmony">
+      <label class="field">
+        <span>Harmonia base</span>
+        <select id="harmonyBase">
+          <option value="off">Desligada</option>
+          <option value="deg1">Grau I (tríade)</option>
+          <option value="deg2">Grau II (tríade)</option>
+          <option value="deg3">Grau III (tríade)</option>
+          <option value="deg4">Grau IV (tríade)</option>
+          <option value="deg5">Grau V (tríade)</option>
+          <option value="deg6">Grau VI (tríade)</option>
+          <option value="deg7">Grau VII (tríade)</option>
+          <option value="V7">V7 (tétrade)</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Execução harmonia</span>
+        <select id="harmonyStyle" title="Articulação específica da harmonia base">
+          <option value="pluck">Pizzicato / Pluck</option>
+          <option value="sustain" selected>Contínuo / Sustain</option>
+          <option value="arpeggio">Arpejo (1 nota / batida)</option>
+          <option value="arpeggio_full">Arpejo completo (todas as notas / batida)</option>
+        </select>
+      </label>
+      <label class="field field-check">
+        <input type="checkbox" id="harmonyMuteChords" title="Mantém a linha de baixo; silencia o acorde no bus da harmonia" />
+        <span>Só baixo (sem acordes)</span>
+      </label>
+      <label class="field field-check">
+        <input type="checkbox" id="bassWithHarmonyOff" title="Usa tríade em I como referência para o baixo" />
+        <span>Baixo com harmonia desligada (I)</span>
+      </label>
+      <label class="field">
+        <span>Volume harmonia</span>
+        <input type="range" id="harmVol" min="0" max="100" value="55" />
+      </label>
+      <label class="field">
+        <span>Linha de baixo</span>
+        <select id="harmonyBassMode" title="Padrão rítmico grave derivado da harmonia base (por tempo / BPM)">
+          <option value="off" selected>Desligada</option>
+          <optgroup label="Alternâncias simples">
+            <option value="fundamental">Só a fundamental</option>
+            <option value="root_fifth">Fundamental ↔ quinta</option>
+            <option value="root_third">Fundamental ↔ terça</option>
+            <option value="root_seventh">Fundamental ↔ sétima (ou quinta)</option>
+            <option value="third_carpet">Carpete na terça</option>
+            <option value="quinta_carpet">Carpete na quinta</option>
+            <option value="fifth_oct_ping">Quinta ↔ quinta oitava abaixo</option>
+            <option value="octave_ping">Salto de oitava na fundamental</option>
+          </optgroup>
+          <optgroup label="Ostinatos e ciclos">
+            <option value="ostinato_1513">1 – 5 – 1 – 3 (4 tempos)</option>
+            <option value="ostinato_1535">1 – 5 – 3 – 5 (4 tempos)</option>
+            <option value="ostinato_1351">1 – 3 – 5 – 1 (4 tempos)</option>
+            <option value="bounce_151">1 – 5 – 1 (3 tempos)</option>
+            <option value="clave5">Clave 5 batidas (1–5–1–1–5)</option>
+            <option value="chromatic_1012">Cromático: 1 – ♭1 – 1 – 2 (4 tempos)</option>
+          </optgroup>
+          <optgroup label="Arpejos e shells">
+            <option value="arp_low">Arpejo ascendente (1–3–5·7)</option>
+            <option value="arp_desc_low">Arpejo descendente (7–5–3–1 ou 5–3–1)</option>
+            <option value="shell_73">Shell: sétima ↔ terça (ou 1↔3)</option>
+          </optgroup>
+          <optgroup label="Pedal">
+            <option value="pedal_tonic">Pedal na tônica (acordes em cima)</option>
+          </optgroup>
+        </select>
+      </label>
+      <label class="field">
+        <span>Volume baixo</span>
+        <input type="range" id="harmonyBassVol" min="0" max="100" value="44" title="Linha de baixo (amostras)" />
+      </label>
+      <label class="field">
+        <span>Oitava do baixo</span>
+        <select id="harmonyBassOctave" title="Deslocamento em relação às alturas da harmonia (ou à tônica, no pedal)">
+          <option value="-36">3 oit. abaixo</option>
+          <option value="-24">2 oit. abaixo</option>
+          <option value="-12" selected>1 oit. abaixo</option>
+          <option value="0">Uníssono (fund.)</option>
+          <option value="12">1 oit. acima</option>
+        </select>
+      </label>
+      <label class="field field-check field-sr-only">
+        <input type="checkbox" id="droneOn" />
+        <span>Som contínuo na tônica (controlado pelo botão)</span>
+      </label>
+      <button type="button" id="btnTonicSound" class="btn" aria-pressed="false">
+        Ativar som da tônica
+      </button>
+      <label class="field">
+        <span>Execução tônica</span>
+        <select id="tonicStyle" title="Articulação específica do som da tônica">
+          <option value="pluck">Pizzicato / Pluck</option>
+          <option value="sustain" selected>Contínuo / Sustain</option>
+          <option value="sustain_lock">Sustain ininterrupto</option>
+          <option value="pulse">Pulsante</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Oitava da tônica</span>
+        <select id="tonicOctave" title="Oitava usada para o som da tônica">
+          <option value="-1">-1</option>
+          <option value="0">0</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4" selected>4</option>
+          <option value="5">5</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Volume tônica</span>
+        <input type="range" id="droneVol" min="0" max="100" value="35" />
+      </label>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="Referência de graus">
+    <h2>Graus diatônicos (vs tônica, 1–22)</h2>
+    <div id="degreeStrip" class="degree-strip"></div>
+  </section>
+
+  <section class="panel" aria-label="Oito slots">
+    <div class="slots-head">
+      <h2>Slots (manual)</h2>
+      <div class="slots-tools">
+        <label class="field slim">
+          <span>Entrada dos slots</span>
+          <select id="slotInputMode" title="Por grau: uma nota por slot. Por acorde: grau da fundamental + qualidade por slot (podem ser diferentes).">
+            <option value="degree" selected>Por grau (nota / calculadora)</option>
+            <option value="chord">Por acorde (7, 7M, 7m…)</option>
+          </select>
+        </label>
+        <label class="field slim">
+          <span>Mix dos slots</span>
+          <select id="slotMixMode" title="Combinar slots com tônica/harmonia ou tocar isolado">
+            <option value="combined" selected>Combinados</option>
+            <option value="isolated">Isolados</option>
+          </select>
+        </label>
+        <label class="field slim">
+          <span>Volume slots</span>
+          <input type="range" id="slotsVol" min="0" max="100" value="70" />
+        </label>
+        <button type="button" id="btnMuteAll" class="btn">Mutar slots</button>
+      </div>
+    </div>
+    <div id="slotMissingNotes" class="slots-missing"></div>
+    <div id="slotChordVoicing" class="slots-chord" aria-live="polite"></div>
+    <div id="slots" class="slots"></div>
+  </section>
+
+  <section class="panel panel-scale-player" aria-label="Tocar escala">
+    <h2>Escala completa</h2>
+    <div class="row row-scale-exec">
+      <label class="field field-wide">
+        <span>Escala (execução)</span>
+        <select id="scaleType" title="Escala usada na sequência, na faixa de graus, nos slots e na harmonia"></select>
+      </label>
+      <label class="field">
+        <span>Direção</span>
+        <select id="seqDir">
+          <option value="up">Subindo</option>
+          <option value="down">Descendo</option>
+          <option value="updown">Sobe e desce</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Ritmo</span>
+        <select id="seqRhythm">
+          <option value="straight8">Pulsos em colcheias</option>
+          <option value="triplet8">Tercinas (8vos)</option>
+          <option value="swing8">Swing leve</option>
+          <option value="dotted">Pontilhado (longo-curto)</option>
+          <option value="clave3-2">Clave 3+2 (5)</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Oitavas</span>
+        <input type="number" id="seqOctaves" min="1" max="3" value="1" />
+      </label>
+      <label class="field field-check">
+        <input type="checkbox" id="seqLatch" checked />
+        <span>Encaixe no próximo tempo</span>
+      </label>
+    </div>
+    <div class="row">
+      <button type="button" id="btnPlayScale" class="btn btn-primary">Tocar escala</button>
+      <button type="button" id="btnStopScale" class="btn">Parar</button>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p>Romanos por terças diatônicas (I–VII). Graus 8+ repetem o símbolo do grau 1–7 correspondente com linhas (′) por cada oitava diatónica — maiúsculas/minúsculas mantêm a qualidade (ex.: ii′, not IX em dó maior).</p>
+    <p class="foot-note">
+      <strong>Banco</strong>: <code>samples/bank/</code> (piano, rhodes, cello, contrabaixo, jazz bass, guitarras, clarinete, flauta…) — ver <code>samples/bank/LEIA-ME.txt</code>. Correr <code>npm run fetch-samples</code> na pasta do projeto descarrega os WAV. O app opera em modo <strong>Instrumento</strong>; drone, harmonia, slots e escalas usam amostras.
+    </p>
+  </footer>
+
+  <script src="sound-bank.js"></script>
+  <script src="instrument-samples.js"></script>
+  <script src="app.js" defer></script>
+</body>
+</html>

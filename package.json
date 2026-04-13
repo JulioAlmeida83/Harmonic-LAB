@@ -1,0 +1,10 @@
+{
+  "name": "harmonic-lab",
+  "private": true,
+  "description": "Harmonic Lab — intervalos, escalas, amostras",
+  "scripts": {
+    "fetch-samples": "node scripts/download-bank.mjs",
+    "serve": "npx --yes serve . -l 3000",
+    "start": "npx --yes serve . -l 3000"
+  }
+}

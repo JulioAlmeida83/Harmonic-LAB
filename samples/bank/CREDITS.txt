@@ -1,0 +1,19 @@
+Créditos — amostras descarregadas automaticamente
+==========================================
+
+Fonte principal:
+  Repositório: https://github.com/nbrosowsky/tonejs-instruments
+  Licença do código: MIT
+  Licença das amostras: CC-BY 3.0 (ver README/LICENSE do repositório)
+
+Mapeamento local (tonejs-instruments / samples):
+  piano, rhodes (organ), cello, acoustic_bass (contrabass)
+  jazz_bass (bass-electric), fender_guitar e guitar_distorted (guitar-electric),
+  acoustic_guitar (guitar-acoustic), clarinet, native_flute (flute sinfónica)
+
+Nomes de ficheiro do pack (ex.: As3, Cs4): «s» = sustenido (A# , C# , …).
+
+As notas são gravadas como âncoras {MIDI}.wav reais por instrumento.
+As notas intermediárias são resolvidas em runtime por vizinho + pitch-shift.
+
+Gerado por: npm run fetch-samples

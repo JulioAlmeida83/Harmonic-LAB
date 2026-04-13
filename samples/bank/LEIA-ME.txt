@@ -1,0 +1,26 @@
+Banco instrumental — Harmonic Lab
+===================================
+
+Descarga automática (recomendado)
+---------------------------------
+Na raiz do projeto (onde está package.json):
+
+  npm run fetch-samples
+
+Isto descarrega amostras WAV (tonejs-instruments, CC-BY 3.0) para cada pasta listada
+em scripts/download-bank.mjs — ver CREDITS.txt após correr o comando.
+
+Pastas (cada uma com {midi}.wav, ex.: 60.wav):
+  piano/, rhodes/, cello/, acoustic_bass/, jazz_bass/, fender_guitar/, guitar_distorted/,
+  acoustic_guitar/, clarinet/, native_flute/
+
+Formato: WAV ou OGG mono ou estéreo, 44,1 kHz ou 48 kHz.
+
+Sem WAV locais, o navegador pode carregar um pack remoto (CORS) — ver sound-bank.js.
+Abre sempre a app com um servidor HTTP (ex.: npx serve . ou python -m http.server), não com file://.
+
+Onde obter sons legais (exemplos; verifica sempre a licença):
+  • Exportar do teu DAW a partir de bibliotecas que permitam uso no projeto
+  • Amostras CC0 / CC-BY em repositórios de áudio aberto (ex.: freesound.org com filtro de licença)
+
+Se um número MIDI não tiver ficheiro, o app tenta a amostra vizinha mais próxima por playbackRate.
