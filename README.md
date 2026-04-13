@@ -26,8 +26,10 @@ Abre `http://localhost:3000` (não uses `file://`).
    git push -u origin main
    ```
 
-3. No GitHub: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-4. O workflow `.github/workflows/pages.yml` publica o site. Após o primeiro push, em **Actions** vê o job; o URL fica em **Settings → Pages** (ex.: `https://SEU_USUARIO.github.io/SEU_REPO/`).
+3. No GitHub: **Settings → Pages → Build and deployment → Source: GitHub Actions** (uma vez por repositório).
+4. Faz push da branch **`main`**. Em **Actions** corre o workflow **Deploy Pages**; o URL aparece no job e em **Settings → Pages** (ex.: `https://SEU_USUARIO.github.io/SEU_REPO/`).
+
+Se o GitHub pedir aprovação do ambiente **github-pages** no primeiro deploy, confirma em **Settings → Environments**.
 
 ### Push grande (~165 MB de WAV)
 
