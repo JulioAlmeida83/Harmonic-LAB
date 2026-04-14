@@ -372,13 +372,6 @@
     <div class="slots-head">
       <h2>Slots (manual)</h2>
       <div class="slots-tools">
-        <label class="field slim">
-          <span>Entrada dos slots</span>
-          <select id="slotInputMode" title="Por grau: uma nota por slot. Por acorde: grau da fundamental + qualidade por slot (podem ser diferentes).">
-            <option value="degree" selected>Por grau (nota / calculadora)</option>
-            <option value="chord">Por acorde (7, 7M, 7m…)</option>
-          </select>
-        </label>
         <label class="field slim is-advanced">
           <span>Mix dos slots</span>
           <select id="slotMixMode" title="Combinar slots com tônica/harmonia ou tocar isolado">
@@ -407,8 +400,20 @@
         >Mutar slots</button>
       </div>
     </div>
-    <div id="slotMissingNotes" class="slots-missing"></div>
+    <!--
+      Header do acorde formado: cada slot ativa 1 nota (grau + oitava) e o
+      nome do acorde/intervalo resultante aparece aqui, em destaque.
+      `#slotsChordHeader` = símbolo principal (ex.: "Cmaj7").
+      `#slotsChordSubhead` = tipo (Acorde/Intervalo/Nota) + notas/voicing.
+      `#slotChordVoicing` = linha secundária com detalhe de registro.
+      `#slotMissingNotes` = dica de graus em falta (modo diatónico).
+    -->
+    <div class="slots-chord-head" aria-live="polite">
+      <div id="slotsChordHeader" class="slots-chord-symbol">—</div>
+      <div id="slotsChordSubhead" class="slots-chord-sub"></div>
+    </div>
     <div id="slotChordVoicing" class="slots-chord" aria-live="polite"></div>
+    <div id="slotMissingNotes" class="slots-missing"></div>
     <div id="slots" class="slots"></div>
   </section>
 

@@ -625,21 +625,68 @@ input[type="checkbox"]:focus-visible {
   color: #c7cfdd;
 }
 
+/* Header do acorde formado pela combinação dos slots ativos.
+   Símbolo grande em destaque + subheader com tipo e voicing. Visualmente
+   assume o papel de "display" do painel, substituindo o antigo selector
+   de modo (grau/acorde) como ponto focal. */
+.slots-chord-head {
+  margin: 0.1rem 0 0.55rem;
+  padding: 0.55rem 0.85rem 0.7rem;
+  background: linear-gradient(
+    180deg,
+    rgba(108, 156, 255, 0.12),
+    rgba(108, 156, 255, 0.04)
+  );
+  border: 1px solid rgba(108, 156, 255, 0.28);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.slots-chord-head.is-empty {
+  background: transparent;
+  border-color: rgba(100, 110, 128, 0.22);
+}
+
+.slots-chord-symbol {
+  font-family: var(--mono);
+  font-size: 1.65rem;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+  color: var(--accent-2);
+  text-align: center;
+  font-weight: 600;
+}
+
+.slots-chord-head.is-empty .slots-chord-symbol {
+  font-size: 1.1rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.slots-chord-sub {
+  font-size: 0.82rem;
+  color: rgba(210, 218, 232, 0.85);
+  text-align: center;
+  line-height: 1.35;
+}
+
 .slots-chord {
   margin: 0.15rem 0 0.65rem;
   padding: 0.45rem 0.65rem;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   line-height: 1.45;
   color: rgba(210, 218, 232, 0.95);
-  background: rgba(108, 156, 255, 0.07);
-  border: 1px solid rgba(108, 156, 255, 0.22);
+  background: rgba(108, 156, 255, 0.05);
+  border: 1px solid rgba(108, 156, 255, 0.16);
   border-radius: 8px;
 }
 
-.slots-chord--empty {
-  color: rgba(154, 163, 178, 0.88);
-  background: transparent;
-  border-color: rgba(100, 110, 128, 0.25);
+.slots-chord--empty,
+.slots-chord:empty {
+  display: none;
 }
 
 .slots-chord:not(.slots-chord--empty) {
@@ -669,16 +716,6 @@ input[type="checkbox"]:focus-visible {
 
 .slot:last-child {
   border-right: none;
-}
-
-.slot-chord-wrap:not(.is-visible) {
-  display: none !important;
-}
-
-.slot-chord-wrap.is-visible {
-  display: flex !important;
-  flex-direction: column;
-  gap: 0.35rem;
 }
 
 .slot.on {

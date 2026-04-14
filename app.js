@@ -7,68 +7,30 @@
  * antes deste ficheiro.
  */
 
-/** `degree`: uma nota por grau. `chord`: raiz na escala + qualidade (7, maj7, m7…). */
+// -----------------------------------------------------------------------------
+// Slots manuais — modelo unificado
+// -----------------------------------------------------------------------------
+// Cada slot representa UMA nota (grau + oitava). O nome do acorde/intervalo
+// formado pela combinação dos slots ativos é detectado a partir das notas
+// em tempo real (ver `describeActiveSlotsChord` + `findChordSymbolFromPcs`).
+// Não há mais "por acorde" / "por grau": visualização única e comportamento
+// único. As funções abaixo preservam a API antiga para minimizar ripple no
+// resto do ficheiro.
+
+/** Sempre devolve "degree" — mantido para retro-compat de call-sites. */
 function currentSlotInputMode() {
-  return document.getElementById("slotInputMode")?.value === "chord" ? "chord" : "degree";
+  return "degree";
 }
 
-/** Intervalos em semitons a partir da fundamental (acordes absolutos, não apenas diatónicos). */
-const CHORD_SLOT_INTERVALS = {
-  maj: [0, 4, 7],
-  min: [0, 3, 7],
-  dim: [0, 3, 6],
-  aug: [0, 4, 8],
-  "7": [0, 4, 7, 10],
-  maj7: [0, 4, 7, 11],
-  m7: [0, 3, 7, 10],
-  m7b5: [0, 3, 6, 10],
-  dim7: [0, 3, 6, 9],
-  sus4: [0, 5, 7],
-  sus2: [0, 2, 7],
-};
-
-const CHORD_SLOT_LABELS = {
-  maj: "M",
-  min: "m",
-  dim: "dim",
-  aug: "aug",
-  "7": "7",
-  maj7: "M7",
-  m7: "m7",
-  m7b5: "m7♭5",
-  dim7: "o7",
-  sus4: "sus4",
-  sus2: "sus2",
-};
-
-/** Sufixo do símbolo de acorde; alias para CHORD_SLOT_LABELS. */
-const CHORD_SLOT_SUFFIX = CHORD_SLOT_LABELS;
-
-function chordSymbolPreview(chordType, rootDeg, ivals, tonicPc, preferFl) {
-  const rp = pitchClassForDegree(rootDeg, ivals, tonicPc);
-  const root = pcToName(rp, preferFl);
-  const suf = CHORD_SLOT_SUFFIX[chordType] ?? "";
-  return `${root}${suf}`;
-}
-
-/** Classes de altura do acorde (ordem do modelo), sem oitavas. */
-function chordCompositionNoteNames(chordType, rootDeg, ivals, tonicPc, preferFl) {
-  const rootPc = pitchClassForDegree(rootDeg, ivals, tonicPc);
-  const ivChord = CHORD_SLOT_INTERVALS[chordType] ?? CHORD_SLOT_INTERVALS.maj;
-  return ivChord.map((iv) => pcToName((rootPc + iv + 120) % 12, preferFl)).join(" · ");
-}
-
+/** Devolve um array [midi] com a nota do slot. Um slot = uma nota. */
 function chordMidisFromSlotState(s, tcp, ivals, baseOct) {
   const rootMidi = midiForScaleDegree(tcp, ivals, s.deg, baseOct + s.oct);
-  if (currentSlotInputMode() !== "chord") return [wrapMidiToRange(rootMidi)];
-  const ivs = CHORD_SLOT_INTERVALS[s.chordType] ?? CHORD_SLOT_INTERVALS.maj;
-  return ivs.map((iv) => wrapMidiToRange(rootMidi + iv));
+  return [wrapMidiToRange(rootMidi)];
 }
 
-/** Mostra o seletor de qualidade por slot só no modo «Por acorde». */
+/** Placeholder: sem seletor de modo para aplicar — apenas mantido. */
 function applySlotInputModeChrome() {
-  const vis = currentSlotInputMode() === "chord";
-  document.querySelectorAll(".slot-chord-wrap").forEach((w) => w.classList.toggle("is-visible", vis));
+  /* no-op (visualização unificada) */
 }
 
 function midiNoteLabel(midi, preferFl) {
@@ -198,9 +160,19 @@ function describeActiveSlotsChord(midis, preferFl) {
   };
 }
 
+/**
+ * Atualiza o "display" dos slots com o nome do acorde/intervalo/nota
+ * formado pela combinação atual. O header grande (`#slotsChordHeader`)
+ * mostra o símbolo principal (ex.: "Cmaj7"); o subheader descreve o tipo
+ * (Acorde/Intervalo/Nota) e lista as notas em classe; a linha inferior
+ * (`#slotChordVoicing`) detalha o voicing registrado. Quando nenhum
+ * slot está ativo, entra em estado "vazio" (placeholder discreto).
+ */
 function updateSlotChordLabel() {
+  const head = document.getElementById("slotsChordHeader");
+  const sub = document.getElementById("slotsChordSubhead");
+  const wrap = head ? head.parentElement : null;
   const el = document.getElementById("slotChordVoicing");
-  if (!el) return;
   const states = readSlotsState();
   const active = states.filter((s) => s.on);
   const tcp = currentTonicPc();
@@ -209,9 +181,16 @@ function updateSlotChordLabel() {
   const base = slotsPlaybackBaseOct();
 
   if (!active.length) {
-    el.textContent =
-      "Combinação dos slots: nenhum ativo. Ligue dois ou mais slots (ou explore uma nota) para ver intervalos e acordes.";
-    el.classList.add("slots-chord--empty");
+    if (head) head.textContent = "— sem slots ativos —";
+    if (sub) {
+      sub.textContent =
+        "Ligue um ou mais slots: o nome do acorde formado aparece aqui.";
+    }
+    if (wrap) wrap.classList.add("is-empty");
+    if (el) {
+      el.textContent = "";
+      el.classList.add("slots-chord--empty");
+    }
     return;
   }
 
@@ -219,16 +198,28 @@ function updateSlotChordLabel() {
   active.forEach((s) => {
     chordMidisFromSlotState(s, tcp, ivals, base).forEach((m) => midis.push(m));
   });
-  const { head, detail } = describeActiveSlotsChord(midis, pf);
-  el.classList.remove("slots-chord--empty");
-  const nPc = new Set(midis.map((m) => ((m % 12) + 12) % 12)).size;
-  const kind = nPc >= 3 ? "Acorde" : nPc === 2 ? "Intervalo" : "Nota";
-  const modeHint =
-    currentSlotInputMode() === "chord"
-      ? " (modo «Por acorde»: grau e qualidade por slot.)"
-      : "";
-  const line1 = `${kind} formado pela combinação atual: ${head}${modeHint}`;
-  el.textContent = detail ? `${line1}\n${detail}` : line1;
+  const { head: label, detail } = describeActiveSlotsChord(midis, pf);
+  // Classes únicas presentes (pc) para distinguir nota/intervalo/acorde.
+  const pcs = [...new Set(midis.map((m) => ((m % 12) + 12) % 12))].sort((a, b) => a - b);
+  const kind = pcs.length >= 3 ? "Acorde" : pcs.length === 2 ? "Intervalo" : "Nota";
+  const classLine = pcs.map((p) => pcToName(p, pf)).join(" · ");
+
+  if (wrap) wrap.classList.remove("is-empty");
+  if (head) head.textContent = label || "—";
+  if (sub) {
+    sub.textContent = pcs.length === 1
+      ? `${kind} única · ${classLine}`
+      : `${kind} · ${classLine}`;
+  }
+  if (el) {
+    if (detail) {
+      el.textContent = detail;
+      el.classList.remove("slots-chord--empty");
+    } else {
+      el.textContent = "";
+      el.classList.add("slots-chord--empty");
+    }
+  }
 }
 
 // --- Harmonia base (DOM adapters) -------------------------------------------
@@ -1986,7 +1977,6 @@ function refreshSlotRow(slot) {
   const iv = currentIvals();
   const tcp = currentTonicPc();
   const pf = preferFlats();
-  const mode = currentSlotInputMode();
   const degLabel = slot.querySelector(".slot-deg-label");
   if (degLabel) degLabel.textContent = "Grau";
 
@@ -2000,28 +1990,9 @@ function refreshSlotRow(slot) {
   const idx = slot.querySelector(".slot-index");
   const r = romanForExtendedDegree(iv, d);
 
-  if (mode === "degree") {
-    if (roman) roman.textContent = r.roman;
-    if (inter) inter.textContent = intervalNameFromTonic(degreeToSemitonesFromTonic(iv, d));
-    if (idx) idx.textContent = `Slot ${slotIdx + 1}\n${formatSlotDegreeLabel(d, iv, tcp, pf)}`;
-  } else {
-    const ct = String(selects[2]?.value ?? "maj");
-    const sym = chordSymbolPreview(ct, d, iv, tcp, pf);
-    const comp = chordCompositionNoteNames(ct, d, iv, tcp, pf);
-    const n = iv.length;
-    if (roman) roman.textContent = `${sym}\nNotas: ${comp}`;
-    if (inter) {
-      const model = CHORD_SLOT_LABELS[ct] ?? ct;
-      if (n === 7) {
-        const innerDeg = ((d - 1) % 7) + 1;
-        const diatTri = romanForDegree(iv, innerDeg);
-        inter.textContent = `Grau ${d} (${r.roman}) · tríade escala: ${triadQualityPt(diatTri.quality)} · modelo: ${model}`;
-      } else {
-        inter.textContent = `Grau ${d} (${r.roman}) · escala com ${n} notas/oitava · modelo: ${model}`;
-      }
-    }
-    if (idx) idx.textContent = `Slot ${slotIdx + 1}\n${formatSlotDegreeLabel(d, iv, tcp, pf)}`;
-  }
+  if (roman) roman.textContent = r.roman;
+  if (inter) inter.textContent = intervalNameFromTonic(degreeToSemitonesFromTonic(iv, d));
+  if (idx) idx.textContent = `Slot ${slotIdx + 1}\n${formatSlotDegreeLabel(d, iv, tcp, pf)}`;
 }
 
 function buildSlots() {
@@ -2087,28 +2058,12 @@ function buildSlots() {
     wrapOct.appendChild(document.createElement("span")).textContent = "Oitava";
     wrapOct.appendChild(octSel);
 
-    const chordSel = document.createElement("select");
-    chordSel.title = "Tipo de acorde deste slot (modo Por acorde)";
-    Object.keys(CHORD_SLOT_LABELS).forEach((key) => {
-      const o = document.createElement("option");
-      o.value = key;
-      o.textContent = CHORD_SLOT_LABELS[key];
-      chordSel.appendChild(o);
-    });
-    chordSel.value = "maj";
-
-    const wrapChord = document.createElement("label");
-    wrapChord.className = "field field-inline slot-chord-wrap";
-    wrapChord.appendChild(document.createElement("span")).textContent = "Qualidade";
-    wrapChord.appendChild(chordSel);
-
     slot.appendChild(idx);
     slot.appendChild(roman);
     slot.appendChild(inter);
     slot.appendChild(wrapOn);
     slot.appendChild(wrapDeg);
     slot.appendChild(wrapOct);
-    slot.appendChild(wrapChord);
 
     refreshSlotRow(slot);
 
@@ -2120,11 +2075,6 @@ function buildSlots() {
     octSel.addEventListener("change", () => {
       refreshSlotRow(slot);
       scheduleSyncAudio();
-    });
-    chordSel.addEventListener("change", () => {
-      refreshSlotRow(slot);
-      scheduleSyncAudio();
-      updateSlotsMissingNotes();
     });
 
     if (on.checked) slot.classList.add("on");
@@ -2146,8 +2096,9 @@ function readSlotsState() {
     const selects = slot.querySelectorAll("select");
     const deg = Number(selects[0]?.value ?? 1);
     const oct = Number(selects[1]?.value ?? 0);
-    const chordType = String(selects[2]?.value ?? "maj");
-    out.push({ on, deg, oct, chordType });
+    // `chordType` é mantido no shape por retro-compat com callers antigos,
+    // mas não afeta mais a síntese: cada slot = 1 nota na visualização única.
+    out.push({ on, deg, oct, chordType: "maj" });
   });
   return out;
 }
@@ -2159,15 +2110,6 @@ function updateSlotsMissingNotes() {
   const ivals = currentIvals();
   const tcp = currentTonicPc();
   const pf = preferFlats();
-
-  if (currentSlotInputMode() === "chord") {
-    if (el) {
-      el.textContent =
-        "Modo «Por acorde»: cada slot escolhe o grau da fundamental e a qualidade do acorde (podem ser diferentes entre slots). A dica de graus em falta aplica-se ao modo «Por grau».";
-    }
-    updateSlotChordLabel();
-    return;
-  }
 
   if (el) {
     const n = ivals.length;
@@ -2185,7 +2127,7 @@ function updateSlotsMissingNotes() {
     }
     if (!active.length) {
       const base = ivals.map((st) => pcToName((tcp + st) % 12, pf)).join(", ");
-      el.textContent = `Notas faltantes nos slots (nenhum ativo): ${base}`;
+      el.textContent = `Notas da escala (nenhum slot ativo): ${base}`;
     } else {
       el.textContent = missing.length
         ? `Notas faltantes nos slots: ${missing.join(", ")}`
@@ -2954,16 +2896,7 @@ function wireGlobalControls() {
     });
   }
 
-  const slotInputMode = document.getElementById("slotInputMode");
-  if (slotInputMode) {
-    slotInputMode.addEventListener("change", () => {
-      applySlotInputModeChrome();
-      refreshAllSlotsUI();
-      updateSlotsMissingNotes();
-      scheduleSyncAudio();
-      refreshSampleExecutionLoop();
-    });
-  }
+  // O antigo selector `#slotInputMode` foi removido (visualização única).
 
   const bankInstrument = document.getElementById("bankInstrument");
   if (bankInstrument) {
@@ -3193,7 +3126,6 @@ renderScaleMeta();
 renderDegreeStrip();
 updateScaleStarLabels();
 buildSlots();
-applySlotInputModeChrome();
 wireGlobalControls();
 wireProgressionControls();
 updateSampleControlsEnabled();
