@@ -921,10 +921,18 @@ function buildScaleDegrees(ivals, dir, octaves) {
   }
   const topTonic = 1 + n * octaves;
   const upWithTop = [...up, topTonic];
-  if (dir === "up") return upWithTop;
-  if (dir === "down") return [...upWithTop].reverse();
-  const down = upWithTop.slice(0, -1).reverse();
-  return [...upWithTop, ...down];
+  const downWithTop = [...upWithTop].reverse();
+  // 'alt_up' / 'alt_down' se comportam como sobe ou desce numa única execução; a
+  // alternância acontece no reagendamento do loop (ver runScaleOnce).
+  if (dir === "up" || dir === "alt_up") return upWithTop;
+  if (dir === "down" || dir === "alt_down") return downWithTop;
+  if (dir === "downup") {
+    const upTail = upWithTop.slice(1);
+    return [...downWithTop, ...upTail];
+  }
+  // updown
+  const downTail = upWithTop.slice(0, -1).reverse();
+  return [...upWithTop, ...downTail];
 }
 
 /**
@@ -1879,7 +1887,7 @@ function wireGlobalControls() {
   });
 
   /** Dispara a escala uma vez e, se `loop` está ligado, reagenda até ao utilizador parar. */
-  async function runScaleOnce(myToken) {
+  async function runScaleOnce(myToken, iteration = 0) {
     if (myToken !== scaleLoopToken) return;
     audio.ensure();
     try {
@@ -1894,7 +1902,11 @@ function wireGlobalControls() {
     syncAudio();
     const tcp = currentTonicPc();
     const ivals = currentIvals();
-    const dir = document.getElementById("seqDir").value;
+    const dirRaw = document.getElementById("seqDir").value;
+    // Direção efetiva: alt_up/alt_down alternam subida/descida a cada iteração do loop.
+    let dir = dirRaw;
+    if (dirRaw === "alt_up") dir = iteration % 2 === 0 ? "up" : "down";
+    else if (dirRaw === "alt_down") dir = iteration % 2 === 0 ? "down" : "up";
     const oct = Number(document.getElementById("seqOctaves").value) || 1;
     const bpm = currentBpm();
     const rhythm = document.getElementById("seqRhythm").value;
@@ -1935,9 +1947,10 @@ function wireGlobalControls() {
     const playDuration = Math.max(total, lastStart + lastDur);
     const waitS = playDuration + Math.max(0, loopGap) * beat + 0.08;
     clearTimeout(scaleLoopTimer);
+    const nextIteration = iteration + 1;
     scaleLoopTimer = setTimeout(() => {
       if (myToken !== scaleLoopToken) return;
-      void runScaleOnce(myToken);
+      void runScaleOnce(myToken, nextIteration);
     }, Math.max(40, Math.round(waitS * 1000)));
   }
 
