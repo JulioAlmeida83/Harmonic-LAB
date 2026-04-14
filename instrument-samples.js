@@ -96,6 +96,30 @@
       this.activeVoices.clear();
     }
 
+    /**
+     * Corta apenas as vozes ligadas a um `dest` específico (ex.: só a harmonia
+     * no `harmStabBus`). Útil para transições de acorde onde não queremos
+     * apagar drone/slots/escala simultaneamente.
+     */
+    stopVoicesOnDest(dest, fadeSec = 0.03) {
+      if (!this.ctx || !this.activeVoices || !dest) return;
+      const t = this.ctx.currentTime;
+      const fade = Math.max(0.005, fadeSec);
+      const toRemove = [];
+      for (const voice of this.activeVoices) {
+        if (voice.dest !== dest) continue;
+        try {
+          const g = voice.g.gain;
+          g.cancelScheduledValues(t);
+          g.setValueAtTime(g.value, t);
+          g.linearRampToValueAtTime(0, t + fade);
+          try { voice.src.stop(t + fade + 0.01); } catch (_) { /* já parou */ }
+        } catch (_) { /* defensivo */ }
+        toRemove.push(voice);
+      }
+      for (const v of toRemove) this.activeVoices.delete(v);
+    }
+
     setFallbackKind(k) {
       const next = (k || "piano").toLowerCase();
       if (next === this.fallbackKind) return;
@@ -702,7 +726,7 @@
       const stopAt = Math.min(t0 + buf.duration / effRate + 0.12, t0 + hold + rel + 0.04);
       src.start(t0);
       src.stop(stopAt);
-      const voice = { src, g, stopAt };
+      const voice = { src, g, stopAt, dest };
       this.activeVoices.add(voice);
       src.onended = () => { this.activeVoices.delete(voice); };
       return true;

@@ -962,53 +962,125 @@ function harmonyPickNote(chord, sel, absBeat) {
   }
 }
 
+/** beat-in-bar (4/4): inteiro 0..3. */
+function beatInBar4(absBeat) {
+  return ((absBeat % 4) + 4) % 4;
+}
+
+/**
+ * Defaults de humanização por categoria de padrão.
+ *   - timingJitterMs: dispersão temporal ±ms (anti-robô)
+ *   - velJitterPct:   dispersão de velocidade ±fração (0.08 = ±8%)
+ *   - strumSpread:    stagger entre notas do acorde num ataque "all" (em beats)
+ *   - legatoMax:      tecto de duração em beats para estilos não-sustain
+ *                     (impede arrastes que emporcalham a próxima batida)
+ */
+const HARMONY_CATEGORY_DEFAULTS = {
+  block: { timingJitterMs: 5, velJitterPct: 0.05, strumSpread: 0, legatoMax: 3.9 },
+  arp: { timingJitterMs: 7, velJitterPct: 0.06, strumSpread: 0, legatoMax: 1.05 },
+  arp_classic: { timingJitterMs: 5, velJitterPct: 0.05, strumSpread: 0, legatoMax: 1.0 },
+  strum: { timingJitterMs: 9, velJitterPct: 0.08, strumSpread: 0.022, legatoMax: 0.95 },
+  finger: { timingJitterMs: 5, velJitterPct: 0.05, strumSpread: 0, legatoMax: 1.0 },
+};
+
+/**
+ * PRNG pseudo-aleatório determinístico (Mulberry32) — "humanização" com
+ * granularidade reprodutível por batida, evitando que o jitter se sobreponha
+ * em fase e produza colapsos rítmicos.
+ */
+function harmonyRand(seed) {
+  let a = (seed >>> 0) || 1;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return (((t ^ (t >>> 14)) >>> 0) % 100000) / 100000;
+  };
+}
+
 /**
  * Dispatcher central. Agenda todos os eventos do padrão `styleKey` para a
- * batida corrente. Devolve o número de eventos agendados (útil em testes).
+ * batida corrente. Aplica humanização (timing/velocidade), strum-spread e
+ * clamp de duração por categoria. Devolve o número de eventos agendados.
  */
 function executeHarmonyPattern({ styleKey, chord, beat, absBeat, peak, schedule }) {
   const pat = HARMONY_EXEC_PATTERNS[styleKey];
-  if (!pat || !chord || !chord.length) {
-    // Fallback seguro: acorde inteiro em sustain.
-    chord?.forEach((m) => schedule({ midi: m, offset: 0, dur: Math.max(beat * 0.95, 0.5), style: "sustain", velMult: 1 }));
-    return chord?.length || 0;
+  if (!chord || !chord.length) return 0;
+  if (!pat) {
+    chord.forEach((m) =>
+      schedule({ midi: m, offset: 0, dur: Math.max(beat * 0.95, 0.5), style: "sustain", velMult: 1 }),
+    );
+    return chord.length;
   }
+  const defaults = HARMONY_CATEGORY_DEFAULTS[pat.category] || HARMONY_CATEGORY_DEFAULTS.block;
+  const h = { ...defaults, ...(pat.humanize || {}) };
+  // Seed combina absBeat + hash curto do styleKey para decorrelacionar padrões.
+  let hk = 0;
+  for (let i = 0; i < styleKey.length; i++) hk = (hk * 31 + styleKey.charCodeAt(i)) >>> 0;
+  const rand = harmonyRand(absBeat * 131 + hk);
+
   let count = 0;
   const emit = (ev) => {
-    // ev: { select|midi|midis, offset(beats), dur(beats), style, velMult }
+    // ev: { select|midi|midis, offset(beats), dur(beats), style, velMult,
+    //       spread(beats), strumDir: "down"|"up" }
     const style = ev.style || "sustain";
-    const offsetSec = (ev.offset ?? 0) * beat;
-    const durSec = Math.max(0.08, (ev.dur ?? 1) * beat);
+    const offBeats = ev.offset ?? 0;
+    let durBeats = ev.dur ?? 1;
+    // Clamp legato: em estilos não-sustain evita arraste para a batida seguinte.
+    if (style !== "sustain") durBeats = Math.min(durBeats, h.legatoMax);
     const vm = ev.velMult ?? 1;
-    if (Array.isArray(ev.midis)) {
-      for (const m of ev.midis) {
-        schedule({ midi: m, offset: offsetSec, dur: durSec, style, velMult: vm });
-        count++;
-      }
-    } else if (typeof ev.midi === "number") {
-      schedule({ midi: ev.midi, offset: offsetSec, dur: durSec, style, velMult: vm });
+
+    // Jitter temporal em segundos (ataque humano).
+    const jitSec = h.timingJitterMs ? ((rand() * 2 - 1) * h.timingJitterMs) / 1000 : 0;
+    const baseOffsetSec = offBeats * beat + jitSec;
+    const durSec = Math.max(0.08, durBeats * beat);
+
+    const scheduleOne = (midi, extraBeats, vMul) => {
+      const velJ = h.velJitterPct ? 1 + (rand() * 2 - 1) * h.velJitterPct : 1;
+      schedule({
+        midi,
+        offset: baseOffsetSec + (extraBeats || 0) * beat,
+        dur: durSec,
+        style,
+        velMult: vm * (vMul ?? 1) * velJ,
+      });
       count++;
+    };
+
+    if (Array.isArray(ev.midis)) {
+      for (const m of ev.midis) scheduleOne(m, 0);
+    } else if (typeof ev.midi === "number") {
+      scheduleOne(ev.midi, 0);
     } else if (ev.select === "all") {
-      for (const m of chord) {
-        schedule({ midi: m, offset: offsetSec, dur: durSec, style, velMult: vm });
-        count++;
+      const spread = ev.spread != null ? ev.spread : h.strumSpread;
+      const dir = ev.strumDir || "down";
+      // "down"=grave→agudo (ordem natural do acorde); "up"=agudo→grave.
+      const notes = dir === "up" ? [...chord].reverse() : chord;
+      for (let i = 0; i < notes.length; i++) {
+        // Leve atenuação por posição no strum (notas tardias levemente mais fracas).
+        const vAttn = Math.max(0.62, 1 - 0.05 * i);
+        scheduleOne(notes[i], i * spread, vAttn);
       }
     } else {
       const m = harmonyPickNote(chord, ev.select, absBeat);
-      if (m != null) {
-        schedule({ midi: m, offset: offsetSec, dur: durSec, style, velMult: vm });
-        count++;
-      }
+      if (m != null) scheduleOne(m, 0);
     }
   };
   pat.exec({ chord, beat, absBeat, peak }, emit);
   return count;
 }
 
-/** beat-in-bar (4/4): inteiro 0..3. */
-function beatInBar4(absBeat) {
-  return ((absBeat % 4) + 4) % 4;
+// --- Utilitários rítmicos -------------------------------------------------
+// Acento-base por batida em compasso 4/4: tempo forte (1), meio-forte (3),
+// fracos (2, 4). Define a "respiração" dinâmica que todos os padrões herdam.
+const BEAT_ACCENT_4 = [1.0, 0.82, 0.92, 0.8];
+function accent4(absBeat) {
+  return BEAT_ACCENT_4[beatInBar4(absBeat)];
 }
+// Micro-swing (atraso das colcheias "and" em beats). Valor leve para não
+// soar jazzy em padrões pop/rock — idiomático apenas onde explicitamente usado.
+const SWING_8 = 0.06;
 
 const HARMONY_EXEC_PATTERNS = {
   // --- Bloco / sustain / pluck --------------------------------------------
@@ -1016,22 +1088,37 @@ const HARMONY_EXEC_PATTERNS = {
     label: "Contínuo / Sustain",
     category: "block",
     exec(ctx, emit) {
-      emit({ select: "all", offset: 0, dur: 1.0, style: "sustain" });
+      // Ligeira ênfase na primeira batida do compasso para marcar o pulso.
+      emit({
+        select: "all",
+        offset: 0,
+        dur: 1.05,
+        style: "sustain",
+        velMult: accent4(ctx.absBeat),
+      });
     },
   },
   pluck: {
     label: "Pizzicato / Pluck",
     category: "block",
     exec(ctx, emit) {
-      emit({ select: "all", offset: 0, dur: 0.6, style: "pluck" });
+      emit({
+        select: "all",
+        offset: 0,
+        dur: 0.55,
+        style: "pluck",
+        spread: 0.01,
+        velMult: accent4(ctx.absBeat),
+      });
     },
   },
   block_whole: {
     label: "Bloco — 1 por compasso (semibreve)",
     category: "block",
     exec(ctx, emit) {
+      // Toca apenas no tempo 1; deixa respirar antes do próximo compasso.
       if (beatInBar4(ctx.absBeat) === 0)
-        emit({ select: "all", offset: 0, dur: 3.9, style: "sustain" });
+        emit({ select: "all", offset: 0, dur: 3.7, style: "sustain", spread: 0.018 });
     },
   },
   block_half: {
@@ -1039,23 +1126,42 @@ const HARMONY_EXEC_PATTERNS = {
     category: "block",
     exec(ctx, emit) {
       const b = beatInBar4(ctx.absBeat);
-      if (b === 0 || b === 2)
-        emit({ select: "all", offset: 0, dur: 1.9, style: "sustain" });
+      // Dur 1.85 (< 2 beats) → liberta a voz antes da próxima mínima.
+      if (b === 0)
+        emit({ select: "all", offset: 0, dur: 1.85, style: "sustain", spread: 0.014 });
+      else if (b === 2)
+        emit({ select: "all", offset: 0, dur: 1.85, style: "sustain", spread: 0.014, velMult: 0.9 });
     },
   },
   chord_pulse_4: {
     label: "Pulso em semínimas (todas as batidas)",
     category: "block",
     exec(ctx, emit) {
-      emit({ select: "all", offset: 0, dur: 0.9, style: "pluck" });
+      emit({
+        select: "all",
+        offset: 0,
+        dur: 0.78,
+        style: "pluck",
+        spread: 0.012,
+        velMult: accent4(ctx.absBeat),
+      });
     },
   },
   chord_pulse_8: {
     label: "Pulso em colcheias",
     category: "block",
     exec(ctx, emit) {
-      emit({ select: "all", offset: 0, dur: 0.42, style: "pluck" });
-      emit({ select: "all", offset: 0.5, dur: 0.42, style: "pluck", velMult: 0.85 });
+      const acc = accent4(ctx.absBeat);
+      emit({ select: "all", offset: 0, dur: 0.42, style: "pluck", spread: 0.01, velMult: acc });
+      // 2.ª colcheia levemente atrasada (swing leve) e mais fraca.
+      emit({
+        select: "all",
+        offset: 0.5 + SWING_8 * 0.5,
+        dur: 0.38,
+        style: "pluck",
+        spread: 0.01,
+        velMult: acc * 0.74,
+      });
     },
   },
 
@@ -1064,21 +1170,39 @@ const HARMONY_EXEC_PATTERNS = {
     label: "Arpejo — 1 nota / batida (cíclico)",
     category: "arp",
     exec(ctx, emit) {
-      emit({ select: "arp_up", offset: 0, dur: 0.9, style: "arpeggio" });
+      emit({
+        select: "arp_up",
+        offset: 0,
+        dur: 0.92,
+        style: "arpeggio",
+        velMult: accent4(ctx.absBeat),
+      });
     },
   },
   arp_down: {
     label: "Arpejo descendente — 1 nota / batida",
     category: "arp",
     exec(ctx, emit) {
-      emit({ select: "arp_down", offset: 0, dur: 0.9, style: "arpeggio" });
+      emit({
+        select: "arp_down",
+        offset: 0,
+        dur: 0.92,
+        style: "arpeggio",
+        velMult: accent4(ctx.absBeat),
+      });
     },
   },
   arp_updown: {
     label: "Arpejo sobe-desce — 1 nota / batida",
     category: "arp",
     exec(ctx, emit) {
-      emit({ select: "arp_updown", offset: 0, dur: 0.9, style: "arpeggio" });
+      emit({
+        select: "arp_updown",
+        offset: 0,
+        dur: 0.92,
+        style: "arpeggio",
+        velMult: accent4(ctx.absBeat),
+      });
     },
   },
   arpeggio_full: {
@@ -1086,10 +1210,17 @@ const HARMONY_EXEC_PATTERNS = {
     category: "arp",
     exec(ctx, emit) {
       const n = ctx.chord.length || 1;
-      const gap = Math.max(0.04, Math.min(0.3, 1 / (n + 1)));
-      const dur = Math.min(0.8, gap * 2.8);
+      // Distribui o acorde ao longo de ~0.9 do beat; a última nota sustenta.
+      const gap = Math.max(0.06, Math.min(0.22, 0.9 / Math.max(1, n)));
       for (let i = 0; i < n; i++) {
-        emit({ midi: ctx.chord[i], offset: i * gap, dur, style: "arpeggio" });
+        const isLast = i === n - 1;
+        emit({
+          midi: ctx.chord[i],
+          offset: i * gap,
+          dur: isLast ? 0.9 : gap * 2.2,
+          style: "arpeggio",
+          velMult: (i === 0 ? 1.0 : 0.88) * accent4(ctx.absBeat),
+        });
       }
     },
   },
@@ -1097,10 +1228,18 @@ const HARMONY_EXEC_PATTERNS = {
     label: "Arpejo ascendente em colcheias",
     category: "arp",
     exec(ctx, emit) {
-      const a = (ctx.absBeat * 2) % (ctx.chord.length || 1);
-      const b = (ctx.absBeat * 2 + 1) % (ctx.chord.length || 1);
-      emit({ midi: ctx.chord[a], offset: 0, dur: 0.45, style: "arpeggio" });
-      emit({ midi: ctx.chord[b], offset: 0.5, dur: 0.45, style: "arpeggio", velMult: 0.9 });
+      const n = ctx.chord.length || 1;
+      const a = (ctx.absBeat * 2) % n;
+      const b = (ctx.absBeat * 2 + 1) % n;
+      const acc = accent4(ctx.absBeat);
+      emit({ midi: ctx.chord[a], offset: 0, dur: 0.48, style: "arpeggio", velMult: acc });
+      emit({
+        midi: ctx.chord[b],
+        offset: 0.5 + SWING_8 * 0.5,
+        dur: 0.45,
+        style: "arpeggio",
+        velMult: acc * 0.82,
+      });
     },
   },
   arp_down_8: {
@@ -1110,8 +1249,15 @@ const HARMONY_EXEC_PATTERNS = {
       const n = ctx.chord.length || 1;
       const a = (n - 1 - ((ctx.absBeat * 2) % n) + n) % n;
       const b = (n - 1 - ((ctx.absBeat * 2 + 1) % n) + n) % n;
-      emit({ midi: ctx.chord[a], offset: 0, dur: 0.45, style: "arpeggio" });
-      emit({ midi: ctx.chord[b], offset: 0.5, dur: 0.45, style: "arpeggio", velMult: 0.9 });
+      const acc = accent4(ctx.absBeat);
+      emit({ midi: ctx.chord[a], offset: 0, dur: 0.48, style: "arpeggio", velMult: acc });
+      emit({
+        midi: ctx.chord[b],
+        offset: 0.5 + SWING_8 * 0.5,
+        dur: 0.45,
+        style: "arpeggio",
+        velMult: acc * 0.82,
+      });
     },
   },
 
@@ -1120,10 +1266,16 @@ const HARMONY_EXEC_PATTERNS = {
     label: "Alberti clássico (1–5–3–5)",
     category: "arp_classic",
     exec(ctx, emit) {
-      // Padrão por compasso: índices 0, 2, 1, 2 (root, 5, 3, 5).
+      // Ordem idiomática por compasso: raiz, 5ª, 3ª, 5ª (acento em 1).
       const seq = [0, 2, 1, 2];
-      const idx = seq[beatInBar4(ctx.absBeat)];
-      emit({ select: idx, offset: 0, dur: 0.95, style: "arpeggio" });
+      const b = beatInBar4(ctx.absBeat);
+      emit({
+        select: seq[b],
+        offset: 0,
+        dur: 0.92,
+        style: "arpeggio",
+        velMult: b === 0 ? 1.0 : 0.84,
+      });
     },
   },
   alberti_rev: {
@@ -1131,34 +1283,63 @@ const HARMONY_EXEC_PATTERNS = {
     category: "arp_classic",
     exec(ctx, emit) {
       const seq = [0, 1, 2, 1];
-      const idx = seq[beatInBar4(ctx.absBeat)];
-      emit({ select: idx, offset: 0, dur: 0.95, style: "arpeggio" });
+      const b = beatInBar4(ctx.absBeat);
+      emit({
+        select: seq[b],
+        offset: 0,
+        dur: 0.92,
+        style: "arpeggio",
+        velMult: b === 0 ? 1.0 : 0.84,
+      });
     },
   },
   broken_1351: {
     label: "1–3–5–1' (arp ascendente por compasso)",
     category: "arp_classic",
     exec(ctx, emit) {
-      const seq = [0, 1, 2, 0];
-      const idx = seq[beatInBar4(ctx.absBeat)];
-      emit({ select: idx, offset: 0, dur: 0.95, style: "arpeggio" });
+      const b = beatInBar4(ctx.absBeat);
+      // Beat 3: oitava acima da raiz (1') → nota explícita fora do selector.
+      if (b === 3) {
+        emit({
+          midi: ctx.chord[0] + 12,
+          offset: 0,
+          dur: 0.95,
+          style: "arpeggio",
+          velMult: 0.88,
+        });
+      } else {
+        emit({
+          select: b, // 0→raiz, 1→3ª, 2→5ª
+          offset: 0,
+          dur: 0.92,
+          style: "arpeggio",
+          velMult: b === 0 ? 1.0 : 0.86,
+        });
+      }
     },
   },
   broken_1535: {
     label: "1–5–3–5 com colcheias",
     category: "arp_classic",
     exec(ctx, emit) {
-      // 2 eventos por beat: (root, 5), (3, 5) — ciclo por compasso.
       const bib = beatInBar4(ctx.absBeat);
+      // 2 colcheias/batida: raiz–5ª, 3ª–5ª, raiz–5ª, 3ª–5ª.
       const pairs = [
         [0, 2],
         [1, 2],
         [0, 2],
         [1, 2],
       ];
-      const [a, b] = pairs[bib];
-      emit({ select: a, offset: 0, dur: 0.45, style: "arpeggio" });
-      emit({ select: b, offset: 0.5, dur: 0.45, style: "arpeggio", velMult: 0.9 });
+      const [a, c] = pairs[bib];
+      const acc = bib === 0 ? 1.0 : bib === 2 ? 0.92 : 0.82;
+      emit({ select: a, offset: 0, dur: 0.46, style: "arpeggio", velMult: acc });
+      emit({
+        select: c,
+        offset: 0.5 + SWING_8 * 0.4,
+        dur: 0.44,
+        style: "arpeggio",
+        velMult: acc * 0.82,
+      });
     },
   },
 
@@ -1166,62 +1347,133 @@ const HARMONY_EXEC_PATTERNS = {
   strum_ballad: {
     label: "Balada — acorde em 1 e 3",
     category: "strum",
+    humanize: { strumSpread: 0.035, timingJitterMs: 7 },
     exec(ctx, emit) {
       const b = beatInBar4(ctx.absBeat);
-      if (b === 0) emit({ select: "all", offset: 0, dur: 1.9, style: "sustain" });
-      else if (b === 2) emit({ select: "all", offset: 0, dur: 1.9, style: "sustain", velMult: 0.9 });
+      // Sustain ligeiramente < 2 beats: corta limpo antes da próxima mínima.
+      if (b === 0)
+        emit({ select: "all", offset: 0, dur: 1.88, style: "sustain", strumDir: "down", velMult: 1.0 });
+      else if (b === 2)
+        emit({ select: "all", offset: 0, dur: 1.88, style: "sustain", strumDir: "down", velMult: 0.88 });
     },
   },
   strum_rock_8: {
-    label: "Rock — colcheias iguais",
+    label: "Rock — colcheias D–U–D–U",
     category: "strum",
+    humanize: { strumSpread: 0.018, timingJitterMs: 8 },
     exec(ctx, emit) {
-      emit({ select: "all", offset: 0, dur: 0.4, style: "pluck" });
-      emit({ select: "all", offset: 0.5, dur: 0.4, style: "pluck", velMult: 0.8 });
+      const b = beatInBar4(ctx.absBeat);
+      // Down fortes nos tempos 1/3; up ligeiramente mais fracos.
+      const accDown = b === 0 ? 1.0 : b === 2 ? 0.94 : 0.86;
+      emit({ select: "all", offset: 0, dur: 0.38, style: "pluck", strumDir: "down", velMult: accDown });
+      emit({
+        select: "all",
+        offset: 0.5,
+        dur: 0.32,
+        style: "pluck",
+        strumDir: "up",
+        velMult: accDown * 0.72,
+      });
     },
   },
   strum_bossa: {
-    label: "Bossa — padrão 2-com. (sync. 1, 1½, 2, 3½)",
+    label: "Bossa — clave 2 compassos (violão sincopado)",
     category: "strum",
+    humanize: { strumSpread: 0.024, timingJitterMs: 8 },
     exec(ctx, emit) {
-      // Padrão clássico de 2 compassos de bossa simplificado para 1 compasso:
-      // Beat 0: down forte; 1.5: up leve; 2: down médio; 3.5: up leve.
-      const b = beatInBar4(ctx.absBeat);
-      if (b === 0) {
-        emit({ select: "all", offset: 0, dur: 0.5, style: "pluck" });
-        emit({ select: "all", offset: 1.5, dur: 0.4, style: "pluck", velMult: 0.7 });
-      } else if (b === 2) {
-        emit({ select: "all", offset: 0, dur: 0.5, style: "pluck", velMult: 0.9 });
-        emit({ select: "all", offset: 1.5, dur: 0.4, style: "pluck", velMult: 0.7 });
+      // 2 compassos de 4/4 = 16 semicolcheias. Colcheia a colcheia (0..15):
+      // hits idiomáticos de bossa (João Gilberto-esque):
+      //   Compasso 1: beat 1 ("dom"), 1-and ("tcha"), 2-and ("dom"), 3 ("tcha")
+      //   Compasso 2: 1-and, 2 ("dom"), 3-and ("tcha")
+      // Mapeado em 8ths absolutas [0..15]: {0,1,3,4, 9,10,13}.
+      const hits = new Set([0, 1, 3, 4, 9, 10, 13]);
+      // Upstrokes onde cai no "and" (pulsos ímpares); downstrokes nas batidas.
+      const abs8 = (ctx.absBeat * 2) % 16;
+      for (let e = 0; e < 2; e++) {
+        const pos = (abs8 + e) % 16;
+        if (!hits.has(pos)) continue;
+        const isAnd = pos % 2 === 1;
+        const vel = pos === 0 ? 1.0 : pos === 4 || pos === 9 || pos === 10 ? 0.9 : 0.78;
+        emit({
+          select: "all",
+          offset: e === 0 ? 0 : 0.5,
+          dur: isAnd ? 0.35 : 0.5,
+          style: "pluck",
+          strumDir: isAnd ? "up" : "down",
+          velMult: vel,
+        });
       }
     },
   },
   strum_samba: {
-    label: "Samba — 16ths sincopados",
+    label: "Samba — 16ths (partido-alto)",
     category: "strum",
+    humanize: { strumSpread: 0.012, timingJitterMs: 6 },
     exec(ctx, emit) {
-      // Por batida: ^ . ^ . com acentos variáveis.
+      // Partido-alto: acentos em 1, 2-a (0.75), 3-e (0.25 do beat 3), 4.
+      // Por batida (4 semicolcheias: 0, 0.25, 0.5, 0.75):
       const b = beatInBar4(ctx.absBeat);
-      const accent = b === 0 || b === 2 ? 1 : 0.85;
-      emit({ select: "all", offset: 0, dur: 0.2, style: "pluck", velMult: accent });
-      emit({ select: "all", offset: 0.5, dur: 0.2, style: "pluck", velMult: 0.75 });
+      // Padrão de presença/acento por batida em semicolcheias.
+      //          0     0.25   0.5    0.75
+      const grid = [
+        [1.0, 0, 0.8, 0], // beat 1: forte, pausa, médio, pausa
+        [0, 0.78, 0.85, 0.95], // beat 2: sincopa em 2e/2&/2a
+        [0.92, 0, 0.82, 0.7], // beat 3: forte, pausa, médio, leve
+        [0, 0.78, 0.88, 0.9], // beat 4: finaliza a frase com push ao compasso 1
+      ];
+      const row = grid[b];
+      const subdivs = [0, 0.25, 0.5, 0.75];
+      for (let i = 0; i < 4; i++) {
+        if (row[i] <= 0) continue;
+        const isDown = i === 0 || i === 2;
+        emit({
+          select: "all",
+          offset: subdivs[i],
+          dur: 0.2,
+          style: "pluck",
+          strumDir: isDown ? "down" : "up",
+          velMult: row[i],
+        });
+      }
     },
   },
   strum_reggae: {
-    label: "Reggae — off-beats (2 e 4)",
+    label: "Reggae — chop nos contratempos (2 e 4)",
     category: "strum",
+    humanize: { strumSpread: 0.008, timingJitterMs: 6 },
     exec(ctx, emit) {
       const b = beatInBar4(ctx.absBeat);
-      if (b === 1 || b === 3) emit({ select: "all", offset: 0, dur: 0.3, style: "pluck" });
+      // Somente tempos 2 e 4 (one-drop). Chop curto, up-stroke, abafado.
+      if (b === 1 || b === 3) {
+        emit({
+          select: "all",
+          offset: 0,
+          dur: 0.22,
+          style: "pluck",
+          strumDir: "up",
+          velMult: b === 1 ? 1.0 : 0.94,
+        });
+      }
     },
   },
   strum_charleston: {
     label: "Charleston (jazz) — 1 e 2-and",
     category: "strum",
+    humanize: { strumSpread: 0.02, timingJitterMs: 9 },
     exec(ctx, emit) {
       const b = beatInBar4(ctx.absBeat);
-      if (b === 0) emit({ select: "all", offset: 0, dur: 0.4, style: "pluck" });
-      if (b === 1) emit({ select: "all", offset: 0.5, dur: 0.6, style: "pluck", velMult: 0.9 });
+      if (b === 0)
+        emit({ select: "all", offset: 0, dur: 0.44, style: "pluck", strumDir: "down", velMult: 1.0 });
+      // "2 and" = beat 1 (zero-indexado) + 0.5, com swing leve.
+      if (b === 1)
+        emit({
+          select: "all",
+          offset: 0.5 + SWING_8 * 0.6,
+          dur: 0.6,
+          style: "pluck",
+          strumDir: "down",
+          velMult: 0.85,
+        });
     },
   },
 
@@ -1231,21 +1483,38 @@ const HARMONY_EXEC_PATTERNS = {
     category: "finger",
     exec(ctx, emit) {
       const b = beatInBar4(ctx.absBeat);
-      // Polegar (baixo) em todas as batidas.
-      emit({ select: "root", offset: 0, dur: 0.9, style: "pluck" });
-      // Dedos em off-beats alternando 3ª e 5ª.
-      const upperSeq = [1, 2, 1, 2]; // 3rd, 5th, 3rd, 5th
-      emit({ select: upperSeq[b], offset: 0.5, dur: 0.45, style: "pluck", velMult: 0.85 });
+      // Baixo alternado: raiz em 1 e 3; 5ª em 2 e 4 (clampa para o topo se
+      // o acorde tiver <3 notas — harmonyPickNote resolve índices excedentes).
+      const bassIdx = b === 0 || b === 2 ? 0 : 2;
+      emit({
+        select: bassIdx,
+        offset: 0,
+        dur: 0.88,
+        style: "pluck",
+        velMult: b === 0 ? 1.0 : 0.88,
+      });
+      // Dedos nas colcheias & alternam 3ª e nota mais aguda.
+      const upper = b % 2 === 0 ? 1 : 3;
+      emit({
+        select: upper,
+        offset: 0.5 + SWING_8 * 0.3,
+        dur: 0.42,
+        style: "pluck",
+        velMult: 0.74,
+      });
     },
   },
   travis_fast: {
-    label: "Travis rápido (2 dedos + polegar)",
+    label: "Travis rápido (16ths alternado)",
     category: "finger",
     exec(ctx, emit) {
-      emit({ select: "root", offset: 0, dur: 0.3, style: "pluck" });
-      emit({ select: 2, offset: 0.25, dur: 0.25, style: "pluck", velMult: 0.85 });
-      emit({ select: 1, offset: 0.5, dur: 0.25, style: "pluck", velMult: 0.85 });
-      emit({ select: 2, offset: 0.75, dur: 0.25, style: "pluck", velMult: 0.8 });
+      const b = beatInBar4(ctx.absBeat);
+      const bassIdx = b === 0 || b === 2 ? 0 : 2;
+      // 1: baixo; 1-e: 5ª (índice 2); 1-&: 3ª (1); 1-a: topo (3).
+      emit({ select: bassIdx, offset: 0, dur: 0.26, style: "pluck", velMult: b === 0 ? 1.0 : 0.92 });
+      emit({ select: 2, offset: 0.25, dur: 0.22, style: "pluck", velMult: 0.74 });
+      emit({ select: 1, offset: 0.5, dur: 0.22, style: "pluck", velMult: 0.8 });
+      emit({ select: 3, offset: 0.75, dur: 0.22, style: "pluck", velMult: 0.72 });
     },
   },
 };
@@ -1261,6 +1530,18 @@ function refreshSampleExecutionLoop() {
   // resetar o contador faria a progressão saltar para o compasso 0 sempre
   // que o applyScale dispara onChange do scaleType — bug visível como
   // "a sequência nunca avança".
+
+  // Assinatura do acorde anterior e estilo — usada para cortar vozes
+  // sustentadas quando a harmonia muda (evita "mudo" em padrões block/strum_ballad
+  // e bigger ringing entre transições de acorde).
+  let lastHarmSig = "";
+  let lastHarmStyle = "";
+  const SUSTAIN_HEAVY = new Set([
+    "sustain",
+    "block_whole",
+    "block_half",
+    "strum_ballad",
+  ]);
 
   const step = () => {
     if (!audioUserEnabled || !audio.ctx || audio.ctx.state !== "running") return;
@@ -1330,6 +1611,29 @@ function refreshSampleExecutionLoop() {
       const absBeat = sampleHarmonyBeatIndex;
       // Teto de segurança por nota (anti-clip): mais alto quando em progressão.
       const perNoteCap = progStep ? 0.42 : 0.22;
+
+      // --- Transição limpa entre acordes ---------------------------------
+      // Se o acorde mudou (assinatura de MIDIs) e o padrão é do tipo sustain
+      // — sustain/block_whole/block_half/strum_ballad — cortamos as vozes
+      // anteriores com um fade curto antes de atacar o novo acorde.  Sem isto,
+      // o acorde antigo continua a ressoar por cima do novo; soa "sujo" mesmo
+      // com dur ligeiramente aparada. Se o padrão for staccato (pluck, arpejos)
+      // o decaimento natural já trata da transição.
+      const sig = harmMidis.join(",");
+      const chordChanged = lastHarmSig !== "" && sig !== lastHarmSig;
+      const styleChanged = lastHarmStyle && lastHarmStyle !== harmonyStyle;
+      if (
+        (chordChanged || styleChanged) &&
+        (SUSTAIN_HEAVY.has(lastHarmStyle) || SUSTAIN_HEAVY.has(harmonyStyle))
+      ) {
+        // Corta SÓ as vozes no bus de harmonia (harmStabBus) — drone/slots/
+        // escala no `scaleSampleBus` continuam intactos. Não tocamos no ganho
+        // do bus para não silenciar o próximo ataque.
+        audio.instrumentSampler?.stopVoicesOnDest?.(audio.harmStabBus, 0.04);
+      }
+      lastHarmSig = sig;
+      lastHarmStyle = harmonyStyle;
+
       executeHarmonyPattern({
         styleKey: harmonyStyle,
         chord: harmMidis,
