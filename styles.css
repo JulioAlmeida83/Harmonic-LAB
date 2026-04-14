@@ -10,6 +10,25 @@
   --slot-w: 112px;
   --font: "Segoe UI", system-ui, sans-serif;
   --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  /* Informa ao browser que os controles nativos (select dropdown, scrollbars,
+     caret de input number) devem ser renderizados em tema escuro. Sem isto,
+     Chrome/Edge abrem o painel do <select> com fundo claro + texto branco. */
+  color-scheme: dark;
+}
+
+/* Lista do dropdown (painel aberto do <select>): garante contraste. Note-se
+   que browsers variam no suporte a estilização de <option> — `color-scheme`
+   acima é o caminho mais fiável; estas regras reforçam quando o browser
+   respeita. */
+select option,
+select optgroup {
+  background: var(--panel);
+  color: var(--text);
+}
+
+select option:checked {
+  background: #2a3652;
+  color: #fff;
 }
 
 * {
@@ -776,7 +795,8 @@ input[type="checkbox"]:focus-visible {
   gap: 0.5rem;
   padding: 0.5rem;
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.04);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
   min-height: 3.25rem;
 }
 
@@ -786,16 +806,17 @@ input[type="checkbox"]:focus-visible {
   gap: 0.35rem;
   align-items: center;
   padding: 0.4rem 0.5rem;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--line-strong);
   border-radius: 6px;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
 .prog-step.is-active {
-  border-color: #2a66d6;
-  box-shadow: 0 0 0 2px rgba(42, 102, 214, 0.25);
-  background: #eef4ff;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(108, 156, 255, 0.35);
+  background: #1c2538;
 }
 
 .prog-step input,
@@ -805,29 +826,41 @@ input[type="checkbox"]:focus-visible {
   padding: 0.3rem 0.4rem;
   font-size: 0.88rem;
   box-sizing: border-box;
+  background: #0c0e12;
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+}
+
+.prog-step input::placeholder {
+  color: var(--muted);
+  opacity: 0.7;
 }
 
 .prog-step .prog-step-label {
   font-size: 0.7rem;
-  opacity: 0.7;
+  opacity: 0.75;
+  color: var(--muted);
   grid-column: 1 / -1;
   margin-bottom: -0.15rem;
 }
 
 .prog-step .prog-step-remove {
   appearance: none;
-  border: 1px solid rgba(0, 0, 0, 0.15);
-  background: #fff;
+  border: 1px solid var(--line-strong);
+  background: #12151c;
+  color: var(--text);
   border-radius: 4px;
   cursor: pointer;
   padding: 0.15rem 0.3rem;
-  font-size: 0.85rem;
+  font-size: 0.95rem;
   line-height: 1;
 }
 
 .prog-step .prog-step-remove:hover {
-  background: #fdeaea;
+  background: #3a1f22;
   border-color: #d66;
+  color: #ffb3b3;
 }
 
 .prog-actions {
