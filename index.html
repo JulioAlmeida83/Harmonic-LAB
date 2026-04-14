@@ -304,6 +304,18 @@
           <input type="checkbox" id="progApplyScale" />
           <span>Aplicar escala ao loop</span>
         </label>
+        <label class="field field-compact" title="Ganho extra aplicado ao acorde da sequência (multiplica o volume da harmonia). 100% = sem reforço; 200% = até 2× mais alto que a harmonia base.">
+          <span>Volume da sequência</span>
+          <input
+            type="range"
+            id="progVol"
+            min="0"
+            max="200"
+            value="100"
+            step="5"
+            aria-label="Volume da sequência de acordes"
+          />
+        </label>
       </div>
     </div>
     <div id="progStepsEditor" class="prog-steps" role="list"></div>

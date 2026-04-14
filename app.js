@@ -1317,9 +1317,19 @@ function refreshSampleExecutionLoop() {
         ? chordMidisAbsolute(progStep.step.chord, baseOct)
         : harmonyMidis(tcp, harmonyRefIvals(), harmIdRaw, baseOct);
       const harmVol = Number(document.getElementById("harmVol").value) / 100;
-      const peak = Math.max(0.04, Math.min(0.16, harmVol * 0.14));
+      // Ganho extra aplicado só quando a sequência está ativa. Permite
+      // destacá-la em relação à harmonia estática sem forçar o utilizador
+      // a mexer no `harmVol` geral. Faixa: 0–200% (slider), default 100%.
+      const progVolEl = document.getElementById("progVol");
+      const progBoost = progStep ? Math.max(0, Number(progVolEl?.value ?? 100)) / 100 : 1;
+      // Em progressão, abrimos o teto do peak (até 0.32) para que o slider
+      // consiga efetivamente aumentar. Sem isso o clamp em 0.16 mascara o boost.
+      const peakHi = progStep ? 0.32 : 0.16;
+      const peak = Math.max(0.04, Math.min(peakHi, harmVol * 0.14 * progBoost));
       const harmonyStyle = document.getElementById("harmonyStyle")?.value || "sustain";
       const absBeat = sampleHarmonyBeatIndex;
+      // Teto de segurança por nota (anti-clip): mais alto quando em progressão.
+      const perNoteCap = progStep ? 0.42 : 0.22;
       executeHarmonyPattern({
         styleKey: harmonyStyle,
         chord: harmMidis,
@@ -1327,7 +1337,7 @@ function refreshSampleExecutionLoop() {
         absBeat,
         peak,
         schedule: ({ midi, offset, dur, style, velMult }) => {
-          const p = Math.max(0.012, Math.min(0.22, peak * (velMult ?? 1)));
+          const p = Math.max(0.012, Math.min(perNoteCap, peak * (velMult ?? 1)));
           audio.instrumentSampler.playNoteAt(audio.harmStabBus, midi, t + offset, p, dur, style);
         },
       });
@@ -2625,7 +2635,7 @@ function wireGlobalControls() {
       refreshSampleExecutionLoop();
     });
   }
-  ["harmVol", "harmonyBassVol", "droneVol", "slotsVol", "globalBpm"].forEach((id) => {
+  ["harmVol", "harmonyBassVol", "droneVol", "slotsVol", "globalBpm", "progVol"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener("input", onContextChange);
   });
@@ -2639,7 +2649,7 @@ function wireGlobalControls() {
   }
 
   // Rótulos de valor ao lado de sliders / inputs numéricos.
-  const valueDisplayIds = ["harmVol", "harmonyBassVol", "droneVol", "slotsVol", "masterGain", "globalBpm"];
+  const valueDisplayIds = ["harmVol", "harmonyBassVol", "droneVol", "slotsVol", "masterGain", "globalBpm", "progVol"];
   const valueSuffix = {
     harmVol: "%",
     harmonyBassVol: "%",
@@ -2647,6 +2657,7 @@ function wireGlobalControls() {
     slotsVol: "%",
     masterGain: "%",
     globalBpm: " BPM",
+    progVol: "%",
   };
   function updateSliderValueLabel(el) {
     if (!el || !el.dataset) return;
