@@ -1270,9 +1270,18 @@ function stopSampleExecutionLoop() {
 
 function refreshSampleExecutionLoop() {
   stopSampleExecutionLoop();
-  if (!audioUserEnabled || !audio.ctx || audio.ctx.state !== "running") return;
+  if (!audioUserEnabled || !audio.ctx || audio.ctx.state !== "running") {
+    // DEBUG
+    try { console.log("[HL.loop] early-exit", { audioUserEnabled, ctx: !!audio.ctx, state: audio.ctx?.state }); } catch (_) {}
+    return;
+  }
   const soundMode = document.getElementById("soundMode")?.value ?? "synth";
-  if (soundMode !== "sample" || !audio.instrumentSampler || !audio.scaleSampleBus) return;
+  if (soundMode !== "sample" || !audio.instrumentSampler || !audio.scaleSampleBus) {
+    // DEBUG
+    try { console.log("[HL.loop] skip (not sample mode)", { soundMode, hasSampler: !!audio.instrumentSampler, hasBus: !!audio.scaleSampleBus }); } catch (_) {}
+    return;
+  }
+  try { console.log("[HL.loop] starting"); } catch (_) {}
 
   const step = () => {
     if (!audioUserEnabled || !audio.ctx || audio.ctx.state !== "running") return;
@@ -1318,8 +1327,11 @@ function refreshSampleExecutionLoop() {
     // Harmonia base (acorde em amostras; pode silenciar só o acorde)
     const harmIdRaw = document.getElementById("harmonyBase")?.value ?? "off";
     const muteHarmChords = harmonyChordSamplesMuted();
+    // DEBUG
+    try { console.log("[HL.step] tick", { t: t.toFixed(3), harmIdRaw, slotsIsolated, muteHarmChords, hasStab: !!audio.harmStabBus, stabGain: audio.harmStabBus?.gain.value }); } catch (_) {}
     if (!slotsIsolated && harmIdRaw !== "off" && !muteHarmChords && audio.harmStabBus) {
       const harmMidis = harmonyMidis(tcp, harmonyRefIvals(), harmIdRaw, baseOct);
+      try { console.log("[HL.step] harm", { harmMidis }); } catch (_) {}
       const harmVol = Number(document.getElementById("harmVol").value) / 100;
       const peak = Math.max(0.04, Math.min(0.16, harmVol * 0.14));
       const harmonyStyle = document.getElementById("harmonyStyle")?.value || "sustain";
@@ -1841,6 +1853,8 @@ function syncAudio() {
   const tcp = currentTonicPc();
   const ivals = currentIvals();
   const baseOct = slotsPlaybackBaseOct();
+  // DEBUG
+  try { console.log("[HL.sync] enter", { tcp, ivals, harmRef: harmonyRefIvals(), baseOct }); } catch (_) {}
   const slotVol = Number(document.getElementById("slotsVol").value) / 100 * 0.35;
   const droneVol = Number(document.getElementById("droneVol").value) / 100 * 0.25;
   const harmVol = Number(document.getElementById("harmVol").value) / 100 * 0.12;
@@ -1854,10 +1868,10 @@ function syncAudio() {
   const muteHarmChords = harmonyChordSamplesMuted();
   const harmMidis = harmonyMidis(tcp, harmonyRefIvals(), harmId, baseOct);
   const freqsH = harmMidis.map((m) => midiToFreq(m));
-  audio.setHarmony(
-    freqsH,
-    soundMode === "sample" ? 0 : harmId === "off" || muteHarmChords ? 0 : harmVol,
-  );
+  const harmVolApplied = soundMode === "sample" ? 0 : harmId === "off" || muteHarmChords ? 0 : harmVol;
+  // DEBUG
+  try { console.log("[HL.sync] harmony", { soundMode, harmId, muteHarmChords, harmMidis, freqsH, harmVolApplied }); } catch (_) {}
+  audio.setHarmony(freqsH, harmVolApplied);
 
   const states = readSlotsState();
   states.forEach((s, i) => {
@@ -1922,6 +1936,8 @@ function wireGlobalControls() {
   }
 
   async function toggleAudio() {
+    // DEBUG
+    try { console.log("[HL.toggleAudio] click", { audioUserEnabled, soundMode: document.getElementById("soundMode")?.value }); } catch (_) {}
     if (!audioUserEnabled) {
       try {
         audio.ensure();
