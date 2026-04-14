@@ -620,8 +620,9 @@ input[type="checkbox"]:focus-visible {
 
 .slots-missing {
   margin: -0.2rem 0 0.55rem;
-  font-size: 0.72rem;
-  color: rgba(154, 163, 178, 0.82);
+  font-size: 0.74rem;
+  /* contraste WCAG AAA sobre fundo --panel (#171a20) */
+  color: #c7cfdd;
 }
 
 .slots-chord {

@@ -267,6 +267,36 @@ function midiForScaleDegree(tonicPc, ivals, degHept, baseOctave) {
   return midiTonic(tonicPc, baseOctave) + degreeToSemitonesFromTonic(ivals, degHept);
 }
 
+/**
+ * Clamp duro de uma nota MIDI para o intervalo válido [0, 127].
+ * Use quando queremos garantir que o oscilador/sampler recebe um valor seguro,
+ * mesmo que isto custe uma mudança audível (acontece só em extremos).
+ */
+function clampMidi(m) {
+  const v = Math.round(Number(m));
+  if (!Number.isFinite(v)) return 60;
+  if (v < 0) return 0;
+  if (v > 127) return 127;
+  return v;
+}
+
+/**
+ * Envolve uma nota MIDI para o intervalo válido transportando por oitavas.
+ * Preserva a classe de altura (mesma nota noutra oitava). Preferível ao clamp
+ * duro para linhas de baixo e arpejos, onde manter a «cor» harmônica importa
+ * mais do que a tessitura exata.
+ */
+function wrapMidiToRange(m, lo = 12, hi = 120) {
+  let v = Math.round(Number(m));
+  if (!Number.isFinite(v)) return 60;
+  while (v < lo) v += 12;
+  while (v > hi) v -= 12;
+  // se o alvo for impossível (lo > hi) caímos num clamp de segurança
+  if (v < 0) v = 0;
+  if (v > 127) v = 127;
+  return v;
+}
+
 /** Oitava base dos slots (alinhada a `syncAudio` / amostras). */
 function slotsPlaybackBaseOct() {
   return 4;
@@ -298,10 +328,159 @@ function harmonyMidis(tonicPc, ivals, harmonyId, baseOct) {
   return [];
 }
 
+// --- Linha de baixo (derivada da harmonia de referência) -------------------
+
+/**
+ * Lista completa dos padrões de baixo disponíveis, na ordem apresentada ao
+ * usuário. Expondo isto aqui permite testar parametrizadamente sem importar
+ * o DOM ou o motor de áudio.
+ */
+const BASS_PATTERN_IDS = [
+  "off",
+  "fundamental",
+  "root_fifth",
+  "root_third",
+  "root_seventh",
+  "third_carpet",
+  "quinta_carpet",
+  "fifth_oct_ping",
+  "octave_ping",
+  "ostinato_1513",
+  "ostinato_1535",
+  "ostinato_1351",
+  "bounce_151",
+  "clave5",
+  "chromatic_1012",
+  "arp_low",
+  "arp_desc_low",
+  "shell_73",
+  "pedal_tonic",
+];
+
+/**
+ * Nota MIDI da linha de baixo para um passo `step` (0-based).
+ *
+ * Argumentos:
+ *   - tonicPc   (0..11): tônica global.
+ *   - ivals     (intervalos, geralmente `harmonyRefIvals()` = Jônio).
+ *   - harmonyId : "off" | "deg1".."deg7" | "V7".
+ *   - baseOct   : oitava da fundamental do acorde.
+ *   - mode      : chave de `BASS_PATTERN_IDS`.
+ *   - step      : índice do passo (contador inteiro de tempo).
+ *   - offset    : transposição em semitonos aplicada ao baixo (-48..+24).
+ *
+ * Regras:
+ *   - `off` e `harmonyId === "off"` devolvem `null`.
+ *   - Para graus diatónicos em tríade (deg1..deg7), deriva a 7ª diatônica
+ *     on-the-fly para permitir que padrões com 7ª (root_seventh, arp_low,
+ *     shell_73) soem coerentes.
+ *   - O resultado é sempre envolvido por `wrapMidiToRange` — em tessituras
+ *     extremas transporta oitavas em vez de gerar MIDI fora de [0,127].
+ */
+function nextHarmonyBassMidi(tonicPc, ivals, harmonyId, baseOct, mode, step, offset = 0) {
+  if (mode === "off" || harmonyId === "off") return null;
+
+  if (mode === "pedal_tonic") {
+    return wrapMidiToRange(midiForScaleDegree(tonicPc, ivals, 1, baseOct) + offset);
+  }
+
+  const harm = harmonyMidis(tonicPc, ivals, harmonyId, baseOct);
+  if (!harm.length) return null;
+
+  const root = harm[0];
+  const third = harm.length > 1 ? harm[1] : root + 4;
+  const fifth = harm.length > 2 ? harm[2] : root + 7;
+  let seventh = harm.length > 3 ? harm[3] : null;
+  if (seventh == null && /^deg[1-7]$/.test(harmonyId)) {
+    const g = Number(harmonyId.slice(3));
+    seventh = midiForScaleDegree(tonicPc, ivals, g + 6, baseOct);
+  }
+
+  const br = root + offset;
+  const bt = third + offset;
+  const bf = fifth + offset;
+  const b7 = seventh != null ? seventh + offset : null;
+
+  let out;
+  switch (mode) {
+    case "fundamental":
+      out = br;
+      break;
+    case "root_fifth":
+      out = step % 2 === 0 ? br : bf;
+      break;
+    case "root_third":
+      out = step % 2 === 0 ? br : bt;
+      break;
+    case "root_seventh":
+      // Com 7ª disponível (sempre, em deg1..deg7 e V7) alternamos 1–7.
+      // Mantemos fallback para 5ª só em caso extremo (harmonia desconhecida).
+      out = b7 != null ? (step % 2 === 0 ? br : b7) : step % 2 === 0 ? br : bf;
+      break;
+    case "third_carpet":
+      out = bt;
+      break;
+    case "ostinato_1513":
+      out = [br, bf, br, bt][step % 4];
+      break;
+    case "ostinato_1535":
+      out = [br, bf, bt, bf][step % 4];
+      break;
+    case "ostinato_1351":
+      out = [br, bt, bf, br][step % 4];
+      break;
+    case "bounce_151":
+      out = [br, bf, br][step % 3];
+      break;
+    case "clave5":
+      out = [br, bf, br, br, bf][step % 5];
+      break;
+    case "chromatic_1012":
+      out = [br, br - 1, br, br + 2][step % 4];
+      break;
+    case "arp_low": {
+      const seq = b7 != null ? [br, bt, bf, b7] : [br, bt, bf];
+      out = seq[step % seq.length];
+      break;
+    }
+    case "arp_desc_low": {
+      const seq = b7 != null ? [b7, bf, bt, br] : [bf, bt, br];
+      out = seq[step % seq.length];
+      break;
+    }
+    case "shell_73":
+      // Shell «7–3»: prefere alternar sétima e terça (sonoridade clássica de
+      // walking bass). Em tríade (sem 7ª), degrada para «1–3», que é o que
+      // sobra harmonicamente — evita silenciar o padrão.
+      out = b7 != null ? (step % 2 === 0 ? b7 : bt) : step % 2 === 0 ? br : bt;
+      break;
+    case "octave_ping":
+      out = step % 2 === 0 ? br : br - 12;
+      break;
+    case "quinta_carpet":
+      out = bf;
+      break;
+    case "fifth_oct_ping":
+      out = step % 2 === 0 ? bf : bf - 12;
+      break;
+    default:
+      out = br;
+  }
+  return wrapMidiToRange(out);
+}
+
 // --- Compatibilidade escala × acorde (estrelas no #scaleType) ---------------
 
 /**
  * Rating 0..3 de uma escala candidata sobre o acorde atual.
+ *
+ * **Convenção dos pitch-classes:**
+ *   `chordPCArr` deve vir em pcs **relativos à tônica da escala** (0 = tônica
+ *   da escala), NÃO relativos à fundamental do acorde. Assim comparamos
+ *   directamente contra `scale.intervals` (também relativos à tônica).
+ *   Quem chama deve converter antes. Exemplos:
+ *     - `currentChordPCsArray()` em app.js já entrega assim.
+ *     - `pickParentScaleForChord()` abaixo converte `chord.rootPc + i - tonicPc`.
  *
  * Regras:
  *   - Fundamental e 3ª são obrigatórias; se faltar qualquer uma → 0★
@@ -504,7 +683,9 @@ function chordPitchClasses(chord) {
 
 /** Notas MIDI absolutas do acorde em `baseOct` (C4 = oitava 4). */
 function chordMidisAbsolute(chord, baseOct = 4) {
-  return chord.intervals.map((ivl) => 12 * (baseOct + 1) + chord.rootPc + ivl);
+  return chord.intervals.map((ivl) =>
+    wrapMidiToRange(12 * (baseOct + 1) + chord.rootPc + ivl)
+  );
 }
 
 // --- Auto-escala (melhor tipo de escala para um acorde) ---------------------
@@ -730,10 +911,14 @@ function stepAtBar(resolvedSteps, barIndex) {
   midiTonic,
   midiForScaleDegree,
   slotsPlaybackBaseOct,
+  clampMidi,
+  wrapMidiToRange,
   // Harmonia
   HARMONY_REF_IVALS,
   harmonyRefIvals,
   harmonyMidis,
+  BASS_PATTERN_IDS,
+  nextHarmonyBassMidi,
   // Compatibilidade escala × acorde
   rateScaleAgainstChord,
   scaleStarsRender,

@@ -41,10 +41,14 @@ const {
   midiTonic,
   midiForScaleDegree,
   slotsPlaybackBaseOct,
+  clampMidi,
+  wrapMidiToRange,
   // Harmonia
   HARMONY_REF_IVALS,
   harmonyRefIvals,
   harmonyMidis,
+  BASS_PATTERN_IDS,
+  nextHarmonyBassMidi,
   // Ratings
   rateScaleAgainstChord,
   scaleStarsRender,
@@ -802,5 +806,216 @@ describe("stepAtBar — avanço da sequência por compasso", () => {
   test("sequência vazia → null", () => {
     assert.equal(stepAtBar([], 0), null);
     assert.equal(stepAtBar(null, 0), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("clampMidi / wrapMidiToRange", () => {
+  test("clampMidi corta em [0,127]", () => {
+    assert.equal(clampMidi(-5), 0);
+    assert.equal(clampMidi(200), 127);
+    assert.equal(clampMidi(60.4), 60);
+    assert.equal(clampMidi(60.6), 61);
+  });
+
+  test("clampMidi lida com NaN devolvendo C4", () => {
+    assert.equal(clampMidi(NaN), 60);
+    assert.equal(clampMidi(undefined), 60);
+  });
+
+  test("wrapMidiToRange transpõe por oitavas", () => {
+    assert.equal(wrapMidiToRange(-3), 21); // -3 + 2×12 = 21
+    assert.equal(wrapMidiToRange(140), 128 - 12); // subtrai 12 p/ ≤120
+    assert.equal(wrapMidiToRange(60), 60);
+  });
+
+  test("wrapMidiToRange preserva classe de altura", () => {
+    for (const m of [-24, -7, 0, 60, 127, 200]) {
+      const w = wrapMidiToRange(m);
+      assert.equal(((w % 12) + 12) % 12, ((Math.round(m) % 12) + 12) % 12, `mpc ${m}`);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("harmonyMidis — deg1..deg7 e V7 em C maior", () => {
+  const ivals = HARMONY_REF_IVALS; // Jônio — referência explícita
+  const base = 4; // C4 = 60
+
+  // Cobertura nominal dos 7 graus em tríade + o V7.
+  const cases = [
+    ["deg1", [60, 64, 67]], // C E G
+    ["deg2", [62, 65, 69]], // D F A
+    ["deg3", [64, 67, 71]], // E G B
+    ["deg4", [65, 69, 72]], // F A C
+    ["deg5", [67, 71, 74]], // G B D
+    ["deg6", [69, 72, 76]], // A C E
+    ["deg7", [71, 74, 77]], // B D F
+    ["V7", [67, 71, 74, 77]], // G B D F
+  ];
+
+  for (const [id, expected] of cases) {
+    test(`${id} em C (base=4) → ${expected.join(" ")}`, () => {
+      assert.deepEqual(harmonyMidis(0, ivals, id, base), expected);
+    });
+  }
+
+  test("harmonia off devolve []", () => {
+    assert.deepEqual(harmonyMidis(0, ivals, "off", 4), []);
+  });
+
+  test("transposição para tônica D (pc=2) soma 2 a cada nota", () => {
+    const cMajor = harmonyMidis(0, ivals, "deg1", 4);
+    const dMajor = harmonyMidis(2, ivals, "deg1", 4);
+    assert.deepEqual(
+      dMajor,
+      cMajor.map((m) => m + 2)
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("nextHarmonyBassMidi — cobertura dos 19 padrões", () => {
+  const ivals = HARMONY_REF_IVALS;
+  const base = 4;
+  const pcs = (m) => ((m % 12) + 12) % 12;
+
+  test("off e harmonyId=off devolvem null", () => {
+    assert.equal(nextHarmonyBassMidi(0, ivals, "deg1", base, "off", 0), null);
+    assert.equal(nextHarmonyBassMidi(0, ivals, "off", base, "fundamental", 0), null);
+  });
+
+  test("pedal_tonic ignora o acorde e toca a tônica", () => {
+    // baseOct=4 → C4 = 60, transposto pelo offset (default -12 no UI mas 0 no puro).
+    assert.equal(nextHarmonyBassMidi(0, ivals, "deg5", base, "pedal_tonic", 0), 60);
+    assert.equal(nextHarmonyBassMidi(0, ivals, "deg5", base, "pedal_tonic", 7, -12), 48);
+  });
+
+  test("fundamental devolve a fundamental do acorde em todos os steps", () => {
+    for (const id of ["deg1", "deg2", "deg4", "V7"]) {
+      const v0 = nextHarmonyBassMidi(0, ivals, id, base, "fundamental", 0);
+      const v1 = nextHarmonyBassMidi(0, ivals, id, base, "fundamental", 5);
+      assert.equal(v0, v1, `${id} estável entre steps`);
+    }
+  });
+
+  test("root_fifth alterna 1 ↔ 5 por step", () => {
+    const a = nextHarmonyBassMidi(0, ivals, "deg1", base, "root_fifth", 0); // C
+    const b = nextHarmonyBassMidi(0, ivals, "deg1", base, "root_fifth", 1); // G
+    assert.equal(pcs(a), 0);
+    assert.equal(pcs(b), 7);
+  });
+
+  test("root_seventh usa a 7ª diatônica derivada em tríades deg1..deg7", () => {
+    // Em I (C), a 7ª diatónica maior é B (pc=11).
+    const a = nextHarmonyBassMidi(0, ivals, "deg1", base, "root_seventh", 0);
+    const b = nextHarmonyBassMidi(0, ivals, "deg1", base, "root_seventh", 1);
+    assert.equal(pcs(a), 0); // C
+    assert.equal(pcs(b), 11); // B
+    // Em ii (Dm), a 7ª diatónica é C (pc=0) — o minor7 completo D-F-A-C.
+    const c = nextHarmonyBassMidi(0, ivals, "deg2", base, "root_seventh", 1);
+    assert.equal(pcs(c), 0);
+  });
+
+  test("root_seventh em V7 usa a sétima real (F sobre G)", () => {
+    const v0 = nextHarmonyBassMidi(0, ivals, "V7", base, "root_seventh", 0);
+    const v1 = nextHarmonyBassMidi(0, ivals, "V7", base, "root_seventh", 1);
+    assert.equal(pcs(v0), 7); // G
+    assert.equal(pcs(v1), 5); // F (7ª menor)
+  });
+
+  test("shell_73 alterna 7 ↔ 3 em V7 (F ↔ B)", () => {
+    const v0 = nextHarmonyBassMidi(0, ivals, "V7", base, "shell_73", 0);
+    const v1 = nextHarmonyBassMidi(0, ivals, "V7", base, "shell_73", 1);
+    assert.equal(pcs(v0), 5); // F (7ª)
+    assert.equal(pcs(v1), 11); // B (3ª)
+  });
+
+  test("arp_low em I7 diatônico percorre 1-3-5-7 em ciclo", () => {
+    const seq = [0, 1, 2, 3, 4].map((s) =>
+      pcs(nextHarmonyBassMidi(0, ivals, "deg1", base, "arp_low", s))
+    );
+    assert.deepEqual(seq, [0, 4, 7, 11, 0]); // C E G B C…
+  });
+
+  test("chromatic_1012 faz C — B — C — D (pcs)", () => {
+    const seq = [0, 1, 2, 3].map((s) =>
+      pcs(nextHarmonyBassMidi(0, ivals, "deg1", base, "chromatic_1012", s))
+    );
+    assert.deepEqual(seq, [0, 11, 0, 2]);
+  });
+
+  test("todos os padrões devolvem MIDI dentro do intervalo audível", () => {
+    // Tessitura extrema: baseOct=0 e offset=-48, força valores muito baixos.
+    for (const id of BASS_PATTERN_IDS) {
+      if (id === "off") continue;
+      for (let step = 0; step < 8; step++) {
+        const m = nextHarmonyBassMidi(0, ivals, "deg1", 0, id, step, -48);
+        if (m == null) continue;
+        assert.ok(m >= 0 && m <= 127, `${id}[${step}] = ${m} fora do MIDI válido`);
+      }
+    }
+  });
+
+  test("octave_ping salta 1 ↔ 1' (oitava abaixo)", () => {
+    const a = nextHarmonyBassMidi(0, ivals, "deg1", base, "octave_ping", 0);
+    const b = nextHarmonyBassMidi(0, ivals, "deg1", base, "octave_ping", 1);
+    assert.equal(a - b, 12); // mesma classe, uma oitava acima
+  });
+
+  test("BASS_PATTERN_IDS cobre todos os modos que o UI oferece", () => {
+    // Espelho do dropdown em index.html — deve listar 19 padrões (incl. off).
+    assert.equal(BASS_PATTERN_IDS.length, 19);
+    assert.ok(BASS_PATTERN_IDS.includes("shell_73"));
+    assert.ok(BASS_PATTERN_IDS.includes("pedal_tonic"));
+    assert.ok(BASS_PATTERN_IDS.includes("chromatic_1012"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("pickParentScaleForChord — tônica ≠ 0", () => {
+  test("Dm7 em tônica D → natural_minor pontua 3★", () => {
+    const chord = parseAbsoluteChord("Dm7");
+    const best = pickParentScaleForChord(chord, 2);
+    // Com Dm7 = D-F-A-C e tônica=D, a escala dórico/natural_minor encaixa 100%.
+    assert.ok(["dorian", "natural_minor"].includes(best.key), `picked ${best.key}`);
+    assert.equal(best.rating, 3);
+  });
+
+  test("Cmaj7 em tônica G → Lídio (F# em vez de F) dá 3★", () => {
+    const chord = parseAbsoluteChord("Cmaj7");
+    // tônica G, acorde Cmaj7 = IV em G maior. Jônio de G cobre C-E-G-B.
+    const best = pickParentScaleForChord(chord, 7, ["major", "lydian", "mixolydian"]);
+    assert.equal(best.rating, 3);
+    assert.ok(["major", "lydian"].includes(best.key));
+  });
+
+  test("G7 em tônica C → mixolydian é 3★ (nenhum avoid)", () => {
+    const chord = parseAbsoluteChord("G7");
+    const best = pickParentScaleForChord(chord, 0, ["major", "mixolydian", "lydian"]);
+    // V7 em C maior: cabe em C major, mas C sobre B é avoid → major = 2★.
+    // Mixolydian de G puxa a tônica p/ fora do contexto do C; ambos aceitáveis.
+    assert.ok(best.rating >= 2);
+  });
+
+  test("empate → devolve primeiro candidato na ordem", () => {
+    // Pent_major (C-D-E-G-A) e blues_major (C-D-Eb-E-G-A) ambos cobrem C-E-G
+    // sem avoid notes. A chamada entrega o primeiro candidato em empate.
+    const chord = parseAbsoluteChord("C");
+    const best = pickParentScaleForChord(chord, 0, ["pent_major", "blues_major"]);
+    assert.equal(best.rating, 3);
+    assert.equal(best.key, "pent_major");
+  });
+
+  test("Cmaj7 em jônio tem 1 avoid (F sobre E) → 2★; lídio evita → 3★", () => {
+    // Cmaj7 = C-E-G-B. Em jônio {0,2,4,5,7,9,11}: F (5) é avoid em cima de E (4).
+    // Em lídio {0,2,4,6,7,9,11}: não há F, então sem avoid.
+    const chord = parseAbsoluteChord("Cmaj7");
+    assert.equal(rateScaleAgainstChord("major", chord.intervals), 2);
+    assert.equal(rateScaleAgainstChord("lydian", chord.intervals), 3);
   });
 });

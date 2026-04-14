@@ -39,7 +39,7 @@
         <span>Tônica</span>
         <select id="tonic"></select>
       </label>
-      <label class="field field-check">
+      <label class="field field-check" title="Exibe acidentes como bemóis (Db, Eb…) em vez de sustenidos (C#, D#…)">
         <input type="checkbox" id="preferFlats" />
         <span>Preferir bemóis</span>
       </label>
@@ -48,14 +48,15 @@
         <input type="number" id="globalBpm" min="40" max="220" value="96" />
       </label>
       <label class="field field-compact is-advanced">
-        <span>Ganho saída</span>
+        <span>Volume geral</span>
         <input
           type="range"
           id="masterGain"
           min="0"
           max="200"
           value="100"
-          title="Percentagem do volume nominal geral (100% = padrão). Valores altos podem saturar."
+          title="Percentagem do volume nominal geral (100% = padrão). Um limitador no master controla picos quando passa de 100%."
+          aria-label="Volume geral de saída em percentagem (0 a 200%)"
         />
       </label>
       <input type="hidden" id="soundMode" value="sample" />
@@ -128,7 +129,15 @@
         </label>
         <label class="field field-compact is-advanced">
           <span>Volume</span>
-          <input type="range" id="droneVol" min="0" max="100" value="35" />
+          <input
+            type="range"
+            id="droneVol"
+            min="0"
+            max="100"
+            value="35"
+            title="Volume do som contínuo da tônica (0–100%)"
+            aria-label="Volume do drone da tônica"
+          />
         </label>
       </div>
     </fieldset>
@@ -165,7 +174,15 @@
         </label>
         <label class="field field-compact is-advanced">
           <span>Volume</span>
-          <input type="range" id="harmVol" min="0" max="100" value="55" />
+          <input
+            type="range"
+            id="harmVol"
+            min="0"
+            max="100"
+            value="55"
+            title="Volume do acorde da harmonia base (0–100%)"
+            aria-label="Volume da harmonia"
+          />
         </label>
       </div>
     </fieldset>
@@ -217,7 +234,15 @@
         </label>
         <label class="field field-compact is-advanced">
           <span>Volume</span>
-          <input type="range" id="harmonyBassVol" min="0" max="100" value="44" title="Linha de baixo (amostras)" />
+          <input
+            type="range"
+            id="harmonyBassVol"
+            min="0"
+            max="100"
+            value="44"
+            title="Volume da linha de baixo (amostras) — 0 a 100%"
+            aria-label="Volume da linha de baixo"
+          />
         </label>
         <label class="field field-check is-advanced">
           <input type="checkbox" id="bassWithHarmonyOff" title="Usa tríade em I como referência para o baixo" />
@@ -231,7 +256,7 @@
     <div class="prog-head">
       <h2>Sequência de acordes <small class="prog-hint">Substitui a harmonia estática por uma progressão que avança por compassos.</small></h2>
       <div class="prog-tools">
-        <label class="field field-check">
+        <label class="field field-check" title="Substitui a harmonia base estática pela sequência editada abaixo">
           <input type="checkbox" id="progEnabled" />
           <span>Ativar sequência</span>
         </label>
@@ -253,8 +278,20 @@
     </div>
     <div id="progStepsEditor" class="prog-steps" role="list"></div>
     <div class="prog-actions">
-      <button type="button" id="progAddStep" class="btn">+ Acorde</button>
-      <button type="button" id="progClear" class="btn">Limpar</button>
+      <button
+        type="button"
+        id="progAddStep"
+        class="btn"
+        title="Adiciona um novo acorde ao final da sequência"
+        aria-label="Adicionar acorde à sequência"
+      >+ Acorde</button>
+      <button
+        type="button"
+        id="progClear"
+        class="btn"
+        title="Remove todos os acordes da sequência"
+        aria-label="Limpar sequência de acordes"
+      >Limpar</button>
       <span id="progNowPlaying" class="prog-now" aria-live="polite"></span>
     </div>
   </section>
@@ -285,9 +322,23 @@
         </label>
         <label class="field slim field-compact is-advanced">
           <span>Volume slots</span>
-          <input type="range" id="slotsVol" min="0" max="100" value="70" />
+          <input
+            type="range"
+            id="slotsVol"
+            min="0"
+            max="100"
+            value="70"
+            title="Volume dos 8 slots manuais (0–100%)"
+            aria-label="Volume dos slots"
+          />
         </label>
-        <button type="button" id="btnMuteAll" class="btn">Mutar slots</button>
+        <button
+          type="button"
+          id="btnMuteAll"
+          class="btn"
+          title="Desativa todos os 8 slots de uma só vez"
+          aria-label="Mutar todos os slots"
+        >Mutar slots</button>
       </div>
     </div>
     <div id="slotMissingNotes" class="slots-missing"></div>
@@ -348,11 +399,11 @@
         <span>Oitavas</span>
         <input type="number" id="seqOctaves" min="1" max="4" value="1" />
       </label>
-      <label class="field field-check is-advanced">
+      <label class="field field-check is-advanced" title="Começa a escala no próximo tempo do BPM em vez de imediatamente (evita colisões rítmicas)">
         <input type="checkbox" id="seqLatch" checked />
         <span>Encaixe no próximo tempo</span>
       </label>
-      <label class="field field-check">
+      <label class="field field-check" title="Ao terminar, toca a escala de novo após a pausa configurada">
         <input type="checkbox" id="seqLoop" />
         <span>Repetir em loop</span>
       </label>
@@ -368,8 +419,20 @@
       </label>
     </div>
     <div class="row row-play-actions">
-      <button type="button" id="btnPlayScale" class="btn btn-primary btn-hero">▶ Tocar escala</button>
-      <button type="button" id="btnStopScale" class="btn">■ Parar</button>
+      <button
+        type="button"
+        id="btnPlayScale"
+        class="btn btn-primary btn-hero"
+        title="Toca a escala completa com o ritmo e direção configurados"
+        aria-label="Tocar escala completa"
+      >▶ Tocar escala</button>
+      <button
+        type="button"
+        id="btnStopScale"
+        class="btn"
+        title="Interrompe a execução da escala"
+        aria-label="Parar execução da escala"
+      >■ Parar</button>
     </div>
   </section>
 

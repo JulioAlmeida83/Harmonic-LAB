@@ -60,9 +60,9 @@ function chordCompositionNoteNames(chordType, rootDeg, ivals, tonicPc, preferFl)
 
 function chordMidisFromSlotState(s, tcp, ivals, baseOct) {
   const rootMidi = midiForScaleDegree(tcp, ivals, s.deg, baseOct + s.oct);
-  if (currentSlotInputMode() !== "chord") return [rootMidi];
+  if (currentSlotInputMode() !== "chord") return [wrapMidiToRange(rootMidi)];
   const ivs = CHORD_SLOT_INTERVALS[s.chordType] ?? CHORD_SLOT_INTERVALS.maj;
-  return ivs.map((iv) => rootMidi + iv);
+  return ivs.map((iv) => wrapMidiToRange(rootMidi + iv));
 }
 
 /** Mostra o seletor de qualidade por slot só no modo «Por acorde». */
@@ -290,74 +290,9 @@ function readHarmonyBassSemitoneOffset() {
   return Math.max(-48, Math.min(24, v));
 }
 
-/**
- * Nota da linha de baixo (derivada das alturas da harmonia base), por padrão e batida.
- * O deslocamento de oitava (`harmonyBassOctave`) soma-se à fundamental, terça, quinta e sétima
- * usadas no padrão. No pedal, aplica-se ao grau I na mesma oitava-base da harmonia.
- */
-function nextHarmonyBassMidi(tonicPc, ivals, harmonyId, baseOct, mode, step) {
-  if (mode === "off") return null;
-  if (harmonyId === "off") return null;
-
-  const off = readHarmonyBassSemitoneOffset();
-  // Baixo sempre deriva do acorde *de referência* (maior natural), coerente com
-  // o acorde emitido em syncAudio / sampleBass — desacoplado do «Tipo de escala».
-  const refIvals = harmonyRefIvals();
-
-  if (mode === "pedal_tonic") {
-    return midiForScaleDegree(tonicPc, refIvals, 1, baseOct) + off;
-  }
-
-  const harm = harmonyMidis(tonicPc, refIvals, harmonyId, baseOct);
-  if (!harm.length) return null;
-
-  const root = harm[0];
-  const third = harm.length > 1 ? harm[1] : root + 4;
-  const fifth = harm.length > 2 ? harm[2] : root + 7;
-  // Para acordes diatônicos em tríade (deg1–deg7), deriva a 7ª diatônica
-  // on-the-fly usando os mesmos intervalos de referência.
-  let seventh = harm.length > 3 ? harm[3] : null;
-  if (seventh == null && /^deg[1-7]$/.test(harmonyId)) {
-    const g = Number(harmonyId.slice(3));
-    seventh = midiForScaleDegree(tonicPc, refIvals, g + 6, baseOct);
-  }
-
-  const br = root + off;
-  const bt = third + off;
-  const bf = fifth + off;
-  const b7 = seventh != null ? seventh + off : null;
-
-  if (mode === "fundamental") return br;
-  if (mode === "root_fifth") return step % 2 === 0 ? br : bf;
-  if (mode === "root_third") return step % 2 === 0 ? br : bt;
-  if (mode === "root_seventh") {
-    if (b7 != null) return step % 2 === 0 ? br : b7;
-    return step % 2 === 0 ? br : bf;
-  }
-  if (mode === "third_carpet") return bt;
-  if (mode === "ostinato_1513") return [br, bf, br, bt][step % 4];
-  if (mode === "ostinato_1535") return [br, bf, bt, bf][step % 4];
-  if (mode === "ostinato_1351") return [br, bt, bf, br][step % 4];
-  if (mode === "bounce_151") return [br, bf, br][step % 3];
-  if (mode === "clave5") return [br, bf, br, br, bf][step % 5];
-  if (mode === "chromatic_1012") return [br, br - 1, br, br + 2][step % 4];
-  if (mode === "arp_low") {
-    const seq = b7 != null ? [br, bt, bf, b7] : [br, bt, bf];
-    return seq[step % seq.length];
-  }
-  if (mode === "arp_desc_low") {
-    const seq = b7 != null ? [b7, bf, bt, br] : [bf, bt, br];
-    return seq[step % seq.length];
-  }
-  if (mode === "shell_73") {
-    if (b7 != null) return step % 2 === 0 ? b7 : bt;
-    return step % 2 === 0 ? br : bt;
-  }
-  if (mode === "octave_ping") return step % 2 === 0 ? br : br - 12;
-  if (mode === "quinta_carpet") return bf;
-  if (mode === "fifth_oct_ping") return step % 2 === 0 ? bf : bf - 12;
-  return br;
-}
+// Nota: a escolha da nota de baixo vive agora em `nextHarmonyBassMidi`
+// (theory.js). O single caller abaixo (syncAudio / sampleBass) passa o
+// offset em semitonos lido do DOM via `readHarmonyBassSemitoneOffset`.
 
 // --- Áudio -----------------------------------------------------------------
 
@@ -394,6 +329,7 @@ class AudioEngine {
     this.ctx = null;
     this.master = null;
     this.masterMix = null;
+    this.masterLimiter = null;
     this.drone = { osc: null, lpf: null, gain: null };
     this.harm = { oscs: [], bus: null };
     this.slots = [];
@@ -420,6 +356,17 @@ class AudioEngine {
     this.masterMix.gain.value = AUDIO_MASTER_NOMINAL;
     this.master = this.masterMix;
 
+    // Compressor / limitador de segurança no barramento master. Absorve picos
+    // quando o usuário leva «Volume geral» a 200–250% com vários buses ativos.
+    // Ataque rápido + knee suave + threshold moderado: transparente na maioria
+    // dos programas, só age nos picos.
+    this.masterLimiter = this.ctx.createDynamicsCompressor();
+    this.masterLimiter.threshold.value = -6; // dB
+    this.masterLimiter.knee.value = 12; // dB (suavizado)
+    this.masterLimiter.ratio.value = 8; // 8:1 — quase um limitador
+    this.masterLimiter.attack.value = 0.004; // 4 ms
+    this.masterLimiter.release.value = 0.18; // 180 ms
+
     const dry = this.ctx.createGain();
     dry.gain.value = 0.86;
     const wet = this.ctx.createGain();
@@ -428,9 +375,11 @@ class AudioEngine {
     conv.buffer = makeReverbIR(this.ctx, 1.2);
     conv.normalize = true;
 
-    this.masterMix.connect(dry);
+    // master → limiter → (dry + wet via convolver) → destination
+    this.masterMix.connect(this.masterLimiter);
+    this.masterLimiter.connect(dry);
     dry.connect(this.ctx.destination);
-    this.masterMix.connect(conv);
+    this.masterLimiter.connect(conv);
     conv.connect(wet);
     wet.connect(this.ctx.destination);
 
@@ -1034,7 +983,16 @@ function refreshSampleExecutionLoop() {
       const bassTonicPc = progStep ? progStep.step.chord.rootPc : tcp;
       const bassIvals = progStep ? progSyntheticIvalsForChord(progStep.step.chord) : harmonyRefIvals();
       const bassHarmId = progStep ? "deg1" : harmIdForBass;
-      const bMidiRaw = nextHarmonyBassMidi(bassTonicPc, bassIvals, bassHarmId, baseOct, bassMode, sampleBassPatIndex);
+      const bassOff = readHarmonyBassSemitoneOffset();
+      const bMidiRaw = nextHarmonyBassMidi(
+        bassTonicPc,
+        bassIvals,
+        bassHarmId,
+        baseOct,
+        bassMode,
+        sampleBassPatIndex,
+        bassOff
+      );
       sampleBassPatIndex += 1;
       if (bMidiRaw != null) {
         // Em vez de clamp (que dobra notas para a mesma altura nos extremos),
