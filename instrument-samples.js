@@ -30,6 +30,21 @@
     return s;
   }
 
+  /** Limites suaves para evitar crescimento indefinido dos caches em sessões longas. */
+  const MAX_NOTE_BUFFERS = 220;
+  const MAX_URL_BUFFERS = 160;
+
+  /** Trim simples por ordem de inserção (Map preserva insertion order). */
+  function trimMap(map, limit) {
+    if (map.size <= limit) return;
+    const excess = map.size - limit;
+    const it = map.keys();
+    for (let i = 0; i < excess; i += 1) {
+      const k = it.next().value;
+      map.delete(k);
+    }
+  }
+
   class InstrumentSampler {
     constructor(audioContext) {
       this.ctx = audioContext;
@@ -145,6 +160,7 @@
         const b = this.createPluckBuffer(midi);
         this.cache.set(midi, b);
         this.midiResampleRate.delete(midi);
+        trimMap(this.cache, MAX_NOTE_BUFFERS);
         return b;
       }
       const sourceVersionAtStart = this.sourceVersion;
@@ -173,6 +189,7 @@
               if (sourceVersionAtStart !== this.sourceVersion) return null;
               this.cache.set(midi, buf);
               this.midiResampleRate.delete(midi);
+              trimMap(this.cache, MAX_NOTE_BUFFERS);
               return buf;
             } catch (_) {
               /* tenta próximo URL */
@@ -194,6 +211,7 @@
                 const stretch = 2 ** ((midi - nearMidi) / 12);
                 if (Math.abs(stretch - 1) > 0.0005) this.midiResampleRate.set(midi, stretch);
                 else this.midiResampleRate.delete(midi);
+                trimMap(this.cache, MAX_NOTE_BUFFERS);
                 return buf;
               }
             } catch (_) {
@@ -224,6 +242,8 @@
                 const stretch = 2 ** ((midi - anchor) / 12);
                 if (Math.abs(stretch - 1) > 0.0005) this.midiResampleRate.set(midi, stretch);
                 else this.midiResampleRate.delete(midi);
+                trimMap(this.cache, MAX_NOTE_BUFFERS);
+                trimMap(this.urlBufferCache, MAX_URL_BUFFERS);
                 return buf;
               }
             } catch (_) {

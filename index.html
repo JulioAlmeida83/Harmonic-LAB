@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Harmonic Lab — Intervalos & Escalas</title>
+  <meta name="color-scheme" content="dark light" />
+  <meta name="theme-color" content="#0f1114" />
+  <meta name="description" content="Harmonic Lab — Laboratório interativo de escalas, intervalos, harmonia e ritmos. 8 slots manuais, linha de baixo, sequenciador de escala com loop e bancos de amostras instrumentais (Web Audio)." />
+  <title>Harmonic Lab — Intervalos, Escalas & Ritmos</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -12,7 +15,13 @@
       <h1>Harmonic Lab</h1>
       <p class="tagline">Tônica, escala, acorde de referência e 8 slots — som imediato.</p>
     </div>
-    <button type="button" id="btnAudio" class="btn btn-primary">Ativar áudio</button>
+    <button
+      type="button"
+      id="btnAudio"
+      class="btn btn-primary"
+      title="Ligar/desligar o motor de áudio (atalho: Espaço)"
+      aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
+    >Ativar áudio</button>
   </header>
 
   <section class="panel panel-context" aria-label="Contexto tonal">
@@ -30,8 +39,8 @@
     <div class="row row-samples">
       <label class="field">
         <span>Instrumento (banco)</span>
-        <select id="bankInstrument" disabled title="Ativo em modo Amostras">
-          <option value="internal">Som interno</option>
+        <select id="bankInstrument" disabled title="Disponível quando o áudio está ativo">
+          <option value="internal">Som interno (síntese)</option>
           <option value="piano">Piano de cauda (grand)</option>
           <option value="rhodes">Rhodes / E-piano</option>
           <option value="cello">Violoncelo</option>
@@ -155,7 +164,13 @@
         <input type="checkbox" id="droneOn" />
         <span>Som contínuo na tônica (controlado pelo botão)</span>
       </label>
-      <button type="button" id="btnTonicSound" class="btn" aria-pressed="false">
+      <button
+        type="button"
+        id="btnTonicSound"
+        class="btn"
+        aria-pressed="false"
+        title="Som contínuo da tônica (drone). Útil como referência auditiva."
+      >
         Ativar som da tônica
       </button>
       <label class="field">
@@ -238,21 +253,56 @@
       </label>
       <label class="field">
         <span>Ritmo</span>
-        <select id="seqRhythm">
-          <option value="straight8">Pulsos em colcheias</option>
-          <option value="triplet8">Tercinas (8vos)</option>
-          <option value="swing8">Swing leve</option>
-          <option value="dotted">Pontilhado (longo-curto)</option>
-          <option value="clave3-2">Clave 3+2 (5)</option>
+        <select id="seqRhythm" title="Padrão rítmico aplicado à sequência">
+          <optgroup label="Regulares">
+            <option value="quarters">Semínimas (tempos)</option>
+            <option value="straight8" selected>Pulsos em colcheias</option>
+            <option value="sixteenths">Semicolcheias</option>
+            <option value="triplet8">Tercinas (8vos)</option>
+            <option value="quarter_triplets">Tercinas de tempo</option>
+          </optgroup>
+          <optgroup label="Feel / swing">
+            <option value="swing8">Swing leve</option>
+            <option value="swing_heavy">Swing pesado</option>
+            <option value="shuffle">Shuffle (tercinas)</option>
+          </optgroup>
+          <optgroup label="Pontilhados e galopes">
+            <option value="dotted">Pontilhado (longo-curto)</option>
+            <option value="reverse_dotted">Pontilhado invertido (curto-longo)</option>
+            <option value="galloping">Galope (1 longa + 2 curtas)</option>
+            <option value="stab_rest">Stab e pausa</option>
+          </optgroup>
+          <optgroup label="Grooves latinos">
+            <option value="clave3-2">Clave 3+2 (5)</option>
+            <option value="clave_son">Clave son (3–2)</option>
+            <option value="clave_rumba">Clave rumba (3–2)</option>
+            <option value="bossa">Bossa nova</option>
+            <option value="samba">Samba (16 por compasso)</option>
+            <option value="habanera">Habanera</option>
+          </optgroup>
         </select>
       </label>
       <label class="field">
         <span>Oitavas</span>
-        <input type="number" id="seqOctaves" min="1" max="3" value="1" />
+        <input type="number" id="seqOctaves" min="1" max="4" value="1" />
       </label>
       <label class="field field-check">
         <input type="checkbox" id="seqLatch" checked />
         <span>Encaixe no próximo tempo</span>
+      </label>
+      <label class="field field-check">
+        <input type="checkbox" id="seqLoop" />
+        <span>Repetir em loop</span>
+      </label>
+      <label class="field">
+        <span>Pausa entre loops</span>
+        <select id="seqLoopGap" title="Silêncio entre repetições da escala">
+          <option value="0">Sem pausa</option>
+          <option value="0.5" selected>½ tempo</option>
+          <option value="1">1 tempo</option>
+          <option value="2">2 tempos</option>
+          <option value="4">1 compasso (4 tempos)</option>
+        </select>
       </label>
     </div>
     <div class="row">

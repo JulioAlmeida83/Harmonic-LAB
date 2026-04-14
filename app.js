@@ -298,19 +298,8 @@ const CHORD_SLOT_LABELS = {
   sus2: "sus2",
 };
 
-const CHORD_SLOT_SUFFIX = {
-  maj: "M",
-  min: "m",
-  dim: "dim",
-  aug: "aug",
-  "7": "7",
-  maj7: "M7",
-  m7: "m7",
-  m7b5: "m7♭5",
-  dim7: "o7",
-  sus4: "sus4",
-  sus2: "sus2",
-};
+/** Sufixo do símbolo de acorde; alias para CHORD_SLOT_LABELS. */
+const CHORD_SLOT_SUFFIX = CHORD_SLOT_LABELS;
 
 function chordSymbolPreview(chordType, rootDeg, ivals, tonicPc, preferFl) {
   const rp = pitchClassForDegree(rootDeg, ivals, tonicPc);
@@ -644,6 +633,9 @@ class AudioEngine {
   ensure() {
     if (this.ctx) return;
     const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) {
+      throw new Error("Web Audio API não suportada neste navegador.");
+    }
     this.ctx = new Ctx();
 
     this.masterMix = this.ctx.createGain();
@@ -935,10 +927,17 @@ function buildScaleDegrees(ivals, dir, octaves) {
   return [...upWithTop, ...down];
 }
 
-/** Retorna tempos relativos (s) e duração de cada nota (s) para o padrão. */
+/**
+ * Retorna tempos relativos (s) e duração de cada nota (s) para um padrão rítmico.
+ * Padrões "com pattern" (bossa, samba, habanera, claves son/rumba, stab_rest) usam
+ * um ciclo cromático fixo com articulações longas/curtas/silêncios — aqui geramos
+ * apenas as notas que SOAM (descartando os silêncios) e avançamos `t` pela duração
+ * do passo (incluindo silêncios) para manter a distribuição temporal do padrão.
+ */
 function rhythmPattern(type, bpm, noteCount, latchToBeat) {
   const beat = 60 / bpm;
   const eighth = beat / 2;
+  const sixteenth = beat / 4;
   const times = [];
   const durs = [];
   let t = 0;
@@ -951,34 +950,113 @@ function rhythmPattern(type, bpm, noteCount, latchToBeat) {
     }
   };
 
-  if (type === "straight8") {
+  // Aplica um padrão cíclico de semicolcheias: 1 = nota, 0 = silêncio.
+  const applyMask = (mask, noteDur) => {
+    let produced = 0;
+    let step = 0;
+    while (produced < noteCount) {
+      const bit = mask[step % mask.length];
+      if (bit) {
+        times.push(t);
+        durs.push(noteDur);
+        produced += 1;
+      }
+      t += sixteenth;
+      step += 1;
+    }
+  };
+
+  if (type === "quarters") {
+    pushSteps(noteCount, beat, beat * 0.9);
+  } else if (type === "straight8") {
     pushSteps(noteCount, eighth, eighth * 0.88);
+  } else if (type === "sixteenths") {
+    pushSteps(noteCount, sixteenth, sixteenth * 0.85);
   } else if (type === "triplet8") {
     const step = beat / 3;
     pushSteps(noteCount, step, step * 0.9);
+  } else if (type === "quarter_triplets") {
+    const step = (2 * beat) / 3;
+    pushSteps(noteCount, step, step * 0.92);
   } else if (type === "swing8") {
     for (let i = 0; i < noteCount; i += 1) {
-      const long = eighth * 0.62;
-      const short = eighth * 0.38;
+      const long = eighth * 1.24;
+      const short = eighth * 0.76;
       const step = i % 2 === 0 ? long : short;
       times.push(t);
       durs.push(step * 0.92);
       t += step;
     }
-  } else if (type === "dotted") {
-    const long = beat * 0.75;
-    const short = beat * 0.25;
+  } else if (type === "swing_heavy") {
     for (let i = 0; i < noteCount; i += 1) {
+      const long = eighth * 1.40;
+      const short = eighth * 0.60;
       const step = i % 2 === 0 ? long : short;
+      times.push(t);
+      durs.push(step * 0.9);
+      t += step;
+    }
+  } else if (type === "shuffle") {
+    // Triplet-feel: longa (2/3 do tempo) + curta (1/3), por tempo.
+    for (let i = 0; i < noteCount; i += 1) {
+      const long = beat * (2 / 3);
+      const short = beat * (1 / 3);
+      const step = i % 2 === 0 ? long : short;
+      times.push(t);
+      durs.push(step * 0.9);
+      t += step;
+    }
+  } else if (type === "dotted") {
+    for (let i = 0; i < noteCount; i += 1) {
+      const step = i % 2 === 0 ? beat * 0.75 : beat * 0.25;
       times.push(t);
       durs.push(Math.min(step * 0.92, beat * 0.85));
       t += step;
     }
-  } else if (type === "clave3-2") {
-    // ciclo de 5 colcheias: acentos 3+2 dentro do compasso de 2 tempos
-    const cell = eighth * 5; // 5 colcheias ~ 2.5 beats - keep simple: 5 equal steps per 2 beats
-    const step = (2 * beat) / 5;
+  } else if (type === "reverse_dotted") {
     for (let i = 0; i < noteCount; i += 1) {
+      const step = i % 2 === 0 ? beat * 0.25 : beat * 0.75;
+      times.push(t);
+      durs.push(Math.min(step * 0.92, beat * 0.85));
+      t += step;
+    }
+  } else if (type === "galloping") {
+    // 1 longa + 2 curtas por tempo (semínima pontilhada + 2 semicolcheias ~ um tempo).
+    const pattern = [beat * 0.5, beat * 0.25, beat * 0.25];
+    for (let i = 0; i < noteCount; i += 1) {
+      const step = pattern[i % pattern.length];
+      times.push(t);
+      durs.push(step * 0.9);
+      t += step;
+    }
+  } else if (type === "stab_rest") {
+    // Alterna nota curta + pausa (colcheia tocada, colcheia silêncio).
+    for (let i = 0; i < noteCount; i += 1) {
+      times.push(t);
+      durs.push(eighth * 0.55);
+      t += eighth * 2;
+    }
+  } else if (type === "clave3-2") {
+    const step = (2 * beat) / 5;
+    pushSteps(noteCount, step, step * 0.9);
+  } else if (type === "clave_son") {
+    // Son 3-2: posições em semicolcheias de um ciclo de 16 (2 compassos 4/4).
+    // Padrão: x . . x . . x . . . x . x . . .
+    applyMask([1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0], sixteenth * 0.9);
+  } else if (type === "clave_rumba") {
+    // Rumba clave 3-2: x . . x . . . x . . x . x . . .
+    applyMask([1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0], sixteenth * 0.9);
+  } else if (type === "bossa") {
+    // Bossa pattern (ciclo 16 semicolcheias): x . . x . . x . . . x . . x . .
+    applyMask([1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0], sixteenth * 0.92);
+  } else if (type === "samba") {
+    // Groove samba cheio: x . x . x . x x x . x . x x x .
+    applyMask([1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0], sixteenth * 0.8);
+  } else if (type === "habanera") {
+    // Habanera: semínima pontilhada + colcheia + duas colcheias
+    const pattern = [beat * 0.75, beat * 0.25, beat * 0.5, beat * 0.5];
+    for (let i = 0; i < noteCount; i += 1) {
+      const step = pattern[i % pattern.length];
       times.push(t);
       durs.push(step * 0.9);
       t += step;
@@ -1003,11 +1081,15 @@ const audio = new AudioEngine();
 /** Saída ligada pelo utilizador (botão Ativar / Desativar). */
 let audioUserEnabled = false;
 let syncAudioRaf = 0;
+/** Timer do loop por amostras. Um só `setTimeout` encadeado evita drift cumulativo. */
 let sampleStepTimer = null;
 let sampleTonicNextAt = 0;
 let sampleHarmonyArpIndex = 0;
 let sampleSlotsArpIndex = 0;
 let sampleBassPatIndex = 0;
+/** Token / timer do loop da escala (cada «Tocar» incrementa o token). */
+let scaleLoopToken = 0;
+let scaleLoopTimer = null;
 
 function scheduleSyncAudio() {
   if (!audioUserEnabled) return;
@@ -1020,8 +1102,7 @@ function scheduleSyncAudio() {
 
 function syncBankSamplerFromUI() {
   if (!audio.instrumentSampler || !globalThis.HLSoundBank) return;
-  let inst = document.getElementById("bankInstrument")?.value || "piano";
-  if (inst === "guibson_guitar") inst = "acoustic_guitar";
+  const inst = document.getElementById("bankInstrument")?.value || "piano";
   globalThis.HLSoundBank.applyInstrumentToSampler(audio.instrumentSampler, inst, {});
   const style = document.getElementById("playStyle")?.value || "sustain";
   if (typeof audio.instrumentSampler.setPlaybackStyle === "function") {
@@ -1052,7 +1133,7 @@ async function preloadSamplerBank() {
 
 function stopSampleExecutionLoop() {
   if (sampleStepTimer) {
-    clearInterval(sampleStepTimer);
+    clearTimeout(sampleStepTimer);
     sampleStepTimer = null;
   }
   sampleTonicNextAt = 0;
@@ -1195,9 +1276,19 @@ function refreshSampleExecutionLoop() {
     }
   };
 
+  // Agendamento auto-encadeado: lê o BPM corrente em cada iteração (sem drift e sem
+  // reinícios quando o utilizador ajusta o andamento).
+  let nextAt = (audio.ctx?.currentTime ?? 0) + 60 / currentBpm();
+  const scheduleNext = () => {
+    if (!audioUserEnabled || !audio.ctx || audio.ctx.state !== "running") return;
+    step();
+    nextAt += 60 / currentBpm();
+    const now = audio.ctx.currentTime;
+    const waitMs = Math.max(20, (nextAt - now) * 1000);
+    sampleStepTimer = setTimeout(scheduleNext, waitMs);
+  };
   step();
-  const ms = Math.max(120, Math.round((60 / currentBpm()) * 1000));
-  sampleStepTimer = setInterval(step, ms);
+  sampleStepTimer = setTimeout(scheduleNext, Math.max(20, (60 / currentBpm()) * 1000));
 }
 
 function updateSampleControlsEnabled() {
@@ -1581,22 +1672,37 @@ function syncAudio() {
 function wireGlobalControls() {
   const btnAudio = document.getElementById("btnAudio");
 
-  function setAudioButtonState(on) {
-    btnAudio.textContent = on ? "Desativar áudio" : "Ativar áudio";
-    btnAudio.setAttribute("aria-pressed", on ? "true" : "false");
-    btnAudio.classList.toggle("btn-primary", on);
+  function setAudioButtonState(state) {
+    // state: false | true | "loading"
+    btnAudio.classList.toggle("btn-primary", state === true || state === "loading");
+    btnAudio.classList.toggle("is-loading", state === "loading");
+    if (state === "loading") {
+      btnAudio.textContent = "A carregar amostras…";
+      btnAudio.setAttribute("aria-pressed", "true");
+      btnAudio.setAttribute("aria-busy", "true");
+    } else {
+      btnAudio.textContent = state ? "Desativar áudio" : "Ativar áudio";
+      btnAudio.setAttribute("aria-pressed", state ? "true" : "false");
+      btnAudio.setAttribute("aria-busy", "false");
+    }
   }
 
-  btnAudio.addEventListener("click", async () => {
+  async function toggleAudio() {
     if (!audioUserEnabled) {
-      audio.ensure();
+      try {
+        audio.ensure();
+      } catch (err) {
+        console.error("Harmonic Lab: falha a iniciar áudio.", err);
+        alert("Não foi possível iniciar o áudio: " + (err && err.message ? err.message : err));
+        return;
+      }
       try {
         await audio.ctx.resume();
       } catch (_) {
         /* ignore */
       }
       audioUserEnabled = true;
-      setAudioButtonState(true);
+      setAudioButtonState("loading");
       syncBankSamplerFromUI();
       updateSampleControlsEnabled();
       const t = audio.ctx.currentTime;
@@ -1608,10 +1714,16 @@ function wireGlobalControls() {
         audio.harmStabBus.gain.cancelScheduledValues(t);
         audio.harmStabBus.gain.setValueAtTime(0.58, t);
       }
-      void preloadSamplerBank();
       applyMasterGainFromUI();
       syncAudio();
       refreshSampleExecutionLoop();
+      try {
+        await preloadSamplerBank();
+      } catch (err) {
+        console.warn("Harmonic Lab: pré-carregamento de amostras incompleto.", err);
+      } finally {
+        if (audioUserEnabled) setAudioButtonState(true);
+      }
       return;
     }
     audio.stopScale();
@@ -1626,6 +1738,19 @@ function wireGlobalControls() {
     audio._harmStabKey = "";
     stopSampleExecutionLoop();
     setAudioButtonState(false);
+  }
+
+  btnAudio.addEventListener("click", toggleAudio);
+
+  // Atalho de teclado: Espaço alterna áudio (fora de campos de formulário).
+  document.addEventListener("keydown", (e) => {
+    if (e.code !== "Space" && e.key !== " ") return;
+    const tgt = e.target;
+    if (!tgt) return;
+    const tag = (tgt.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select" || tgt.isContentEditable) return;
+    e.preventDefault();
+    void toggleAudio();
   });
 
   const onContextChange = () => {
@@ -1665,13 +1790,13 @@ function wireGlobalControls() {
     "harmonyBassMode",
     "harmonyBassOctave",
     "droneOn",
-    "soundMode",
     "playStyle",
     "tonicStyle",
     "tonicOctave",
     "slotMixMode",
   ].forEach((id) => {
-    document.getElementById(id).addEventListener("change", onContextChange);
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", onContextChange);
   });
 
   const slotInputMode = document.getElementById("slotInputMode");
@@ -1696,15 +1821,52 @@ function wireGlobalControls() {
     });
   }
   ["harmVol", "harmonyBassVol", "droneVol", "slotsVol", "globalBpm"].forEach((id) => {
-    document.getElementById(id).addEventListener("input", onContextChange);
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("input", onContextChange);
   });
 
   const masterGainEl = document.getElementById("masterGain");
   if (masterGainEl) {
     masterGainEl.addEventListener("input", () => {
       applyMasterGainFromUI();
+      updateSliderValueLabel(masterGainEl);
     });
   }
+
+  // Rótulos de valor ao lado de sliders / inputs numéricos.
+  const valueDisplayIds = ["harmVol", "harmonyBassVol", "droneVol", "slotsVol", "masterGain", "globalBpm"];
+  const valueSuffix = {
+    harmVol: "%",
+    harmonyBassVol: "%",
+    droneVol: "%",
+    slotsVol: "%",
+    masterGain: "%",
+    globalBpm: " BPM",
+  };
+  function updateSliderValueLabel(el) {
+    if (!el || !el.dataset) return;
+    const tag = el.dataset.valueLabel;
+    if (!tag) return;
+    const span = document.getElementById(tag);
+    if (span) {
+      const suf = valueSuffix[el.id] || "";
+      span.textContent = `${el.value}${suf}`;
+    }
+  }
+  valueDisplayIds.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // cria um <span> adjacente dentro do <label>
+    const host = el.closest("label") || el.parentElement;
+    if (!host) return;
+    const span = document.createElement("span");
+    span.className = "field-value";
+    span.id = `val_${id}`;
+    el.dataset.valueLabel = span.id;
+    host.appendChild(span);
+    updateSliderValueLabel(el);
+    el.addEventListener("input", () => updateSliderValueLabel(el));
+  });
 
   document.getElementById("btnMuteAll").addEventListener("click", () => {
     document.querySelectorAll('.slot input[type="checkbox"]').forEach((c) => {
@@ -1716,7 +1878,9 @@ function wireGlobalControls() {
     refreshSampleExecutionLoop();
   });
 
-  document.getElementById("btnPlayScale").addEventListener("click", async () => {
+  /** Dispara a escala uma vez e, se `loop` está ligado, reagenda até ao utilizador parar. */
+  async function runScaleOnce(myToken) {
+    if (myToken !== scaleLoopToken) return;
     audio.ensure();
     try {
       await audio.ctx.resume();
@@ -1731,15 +1895,17 @@ function wireGlobalControls() {
     const tcp = currentTonicPc();
     const ivals = currentIvals();
     const dir = document.getElementById("seqDir").value;
-    const oct = Number(document.getElementById("seqOctaves").value);
+    const oct = Number(document.getElementById("seqOctaves").value) || 1;
     const bpm = currentBpm();
     const rhythm = document.getElementById("seqRhythm").value;
     const latch = document.getElementById("seqLatch").checked;
+    const loopOn = !!document.getElementById("seqLoop")?.checked;
+    const loopGap = Number(document.getElementById("seqLoopGap")?.value ?? 0.5) || 0;
     const degs = buildScaleDegrees(ivals, dir, oct);
     const baseOct = slotsPlaybackBaseOct();
     const midis = degs.map((d) => midiForScaleDegree(tcp, ivals, d, baseOct));
     const freqs = midis.map((m) => midiToFreq(m));
-    const { times, durs } = rhythmPattern(rhythm, bpm, freqs.length, latch);
+    const { times, durs, total } = rhythmPattern(rhythm, bpm, freqs.length, latch);
 
     const soundMode = document.getElementById("soundMode")?.value ?? "synth";
     let mode = "synth";
@@ -1758,13 +1924,55 @@ function wireGlobalControls() {
       sampler = s;
     }
 
+    if (myToken !== scaleLoopToken) return;
     await audio.playScaleSequence({ freqs, times, durs, gain: 0.32, mode, midis, sampler });
+
+    if (!loopOn || myToken !== scaleLoopToken) return;
+    const beat = 60 / bpm;
+    const lastIdx = times.length - 1;
+    const lastDur = durs[lastIdx] ?? beat;
+    const lastStart = times[lastIdx] ?? 0;
+    const playDuration = Math.max(total, lastStart + lastDur);
+    const waitS = playDuration + Math.max(0, loopGap) * beat + 0.08;
+    clearTimeout(scaleLoopTimer);
+    scaleLoopTimer = setTimeout(() => {
+      if (myToken !== scaleLoopToken) return;
+      void runScaleOnce(myToken);
+    }, Math.max(40, Math.round(waitS * 1000)));
+  }
+
+  function stopScaleLoop() {
+    scaleLoopToken += 1;
+    if (scaleLoopTimer) {
+      clearTimeout(scaleLoopTimer);
+      scaleLoopTimer = null;
+    }
+  }
+
+  document.getElementById("btnPlayScale").addEventListener("click", () => {
+    stopScaleLoop();
+    scaleLoopToken += 1;
+    void runScaleOnce(scaleLoopToken);
   });
 
   document.getElementById("btnStopScale").addEventListener("click", () => {
+    stopScaleLoop();
     audio.stopScale();
     stopSampleExecutionLoop();
   });
+
+  // Se o utilizador desliga o loop enquanto já está a correr, cancela o reagendamento.
+  const seqLoopEl = document.getElementById("seqLoop");
+  if (seqLoopEl) {
+    seqLoopEl.addEventListener("change", () => {
+      if (!seqLoopEl.checked) {
+        if (scaleLoopTimer) {
+          clearTimeout(scaleLoopTimer);
+          scaleLoopTimer = null;
+        }
+      }
+    });
+  }
 
   setAudioButtonState(false);
   syncTonicSoundButton();
