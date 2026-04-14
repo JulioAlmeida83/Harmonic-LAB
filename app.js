@@ -1859,6 +1859,37 @@ function wireGlobalControls() {
 
   btnAudio.addEventListener("click", toggleAudio);
 
+  // Modo simples/avançado — esconde campos .is-advanced no modo simples.
+  const btnMode = document.getElementById("btnMode");
+  if (btnMode) {
+    const MODE_KEY = "hl.uiMode";
+    const applyMode = (mode) => {
+      const isSimple = mode !== "advanced";
+      document.body.classList.toggle("mode-simple", isSimple);
+      btnMode.setAttribute("aria-pressed", isSimple ? "false" : "true");
+      btnMode.textContent = isSimple ? "Modo avançado" : "Modo simples";
+      btnMode.title = isSimple
+        ? "Mostrar todos os controles (volumes, oitavas, execução detalhada…)"
+        : "Esconder controles avançados e mostrar só o essencial";
+    };
+    let savedMode = "simple";
+    try {
+      savedMode = localStorage.getItem(MODE_KEY) || "simple";
+    } catch (_) {
+      savedMode = "simple";
+    }
+    applyMode(savedMode);
+    btnMode.addEventListener("click", () => {
+      const next = document.body.classList.contains("mode-simple") ? "advanced" : "simple";
+      applyMode(next);
+      try {
+        localStorage.setItem(MODE_KEY, next);
+      } catch (_) {
+        /* storage opcional */
+      }
+    });
+  }
+
   // Atalho de teclado: Espaço alterna áudio (fora de campos de formulário).
   document.addEventListener("keydown", (e) => {
     if (e.code !== "Space" && e.key !== " ") return;

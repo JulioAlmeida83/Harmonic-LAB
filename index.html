@@ -15,18 +15,27 @@
       <h1>Harmonic Lab</h1>
       <p class="tagline">Tônica, escala, acorde de referência e 8 slots — som imediato.</p>
     </div>
-    <button
-      type="button"
-      id="btnAudio"
-      class="btn btn-primary"
-      title="Ligar/desligar o motor de áudio (atalho: Espaço)"
-      aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
-    >Ativar áudio</button>
+    <div class="top-actions">
+      <button
+        type="button"
+        id="btnMode"
+        class="btn btn-mode"
+        aria-pressed="false"
+        title="Alterna entre modo simples (só essencial) e avançado (todos os controles)"
+      >Modo avançado</button>
+      <button
+        type="button"
+        id="btnAudio"
+        class="btn btn-primary"
+        title="Ligar/desligar o motor de áudio (atalho: Espaço)"
+        aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
+      >Ativar áudio</button>
+    </div>
   </header>
 
   <section class="panel panel-context" aria-label="Contexto tonal">
     <div class="row row-global">
-      <label class="field">
+      <label class="field field-hero">
         <span>Tônica</span>
         <select id="tonic"></select>
       </label>
@@ -34,11 +43,11 @@
         <input type="checkbox" id="preferFlats" />
         <span>Preferir bemóis</span>
       </label>
-      <label class="field">
-        <span>BPM global</span>
+      <label class="field field-compact">
+        <span>BPM</span>
         <input type="number" id="globalBpm" min="40" max="220" value="96" />
       </label>
-      <label class="field">
+      <label class="field field-compact is-advanced">
         <span>Ganho saída</span>
         <input
           type="range"
@@ -96,7 +105,7 @@
         >
           Ativar som da tônica
         </button>
-        <label class="field">
+        <label class="field is-advanced">
           <span>Execução tônica</span>
           <select id="tonicStyle" title="Articulação específica do som da tônica">
             <option value="pluck">Pizzicato / Pluck</option>
@@ -105,8 +114,8 @@
             <option value="pulse">Pulsante</option>
           </select>
         </label>
-        <label class="field">
-          <span>Oitava da tônica</span>
+        <label class="field field-compact is-advanced">
+          <span>Oitava</span>
           <select id="tonicOctave" title="Oitava usada para o som da tônica">
             <option value="-1">-1</option>
             <option value="0">0</option>
@@ -117,8 +126,8 @@
             <option value="5">5</option>
           </select>
         </label>
-        <label class="field">
-          <span>Volume tônica</span>
+        <label class="field field-compact is-advanced">
+          <span>Volume</span>
           <input type="range" id="droneVol" min="0" max="100" value="35" />
         </label>
       </div>
@@ -141,7 +150,7 @@
             <option value="V7">V7 (tétrade)</option>
           </select>
         </label>
-        <label class="field">
+        <label class="field is-advanced">
           <span>Execução harmonia</span>
           <select id="harmonyStyle" title="Articulação específica da harmonia base">
             <option value="pluck">Pizzicato / Pluck</option>
@@ -150,12 +159,12 @@
             <option value="arpeggio_full">Arpejo completo (todas as notas / batida)</option>
           </select>
         </label>
-        <label class="field field-check">
+        <label class="field field-check is-advanced">
           <input type="checkbox" id="harmonyMuteChords" title="Mantém a linha de baixo; silencia o acorde no bus da harmonia" />
           <span>Só baixo (sem acordes)</span>
         </label>
-        <label class="field">
-          <span>Volume harmonia</span>
+        <label class="field field-compact is-advanced">
+          <span>Volume</span>
           <input type="range" id="harmVol" min="0" max="100" value="55" />
         </label>
       </div>
@@ -196,8 +205,8 @@
             </optgroup>
           </select>
         </label>
-        <label class="field">
-          <span>Oitava do baixo</span>
+        <label class="field field-compact is-advanced">
+          <span>Oitava</span>
           <select id="harmonyBassOctave" title="Deslocamento em relação às alturas da harmonia (ou à tônica, no pedal)">
             <option value="-36">3 oit. abaixo</option>
             <option value="-24">2 oit. abaixo</option>
@@ -206,11 +215,11 @@
             <option value="12">1 oit. acima</option>
           </select>
         </label>
-        <label class="field">
-          <span>Volume baixo</span>
+        <label class="field field-compact is-advanced">
+          <span>Volume</span>
           <input type="range" id="harmonyBassVol" min="0" max="100" value="44" title="Linha de baixo (amostras)" />
         </label>
-        <label class="field field-check">
+        <label class="field field-check is-advanced">
           <input type="checkbox" id="bassWithHarmonyOff" title="Usa tríade em I como referência para o baixo" />
           <span>Tocar baixo mesmo com harmonia desligada (I)</span>
         </label>
@@ -235,14 +244,14 @@
             <option value="chord">Por acorde (7, 7M, 7m…)</option>
           </select>
         </label>
-        <label class="field slim">
+        <label class="field slim is-advanced">
           <span>Mix dos slots</span>
           <select id="slotMixMode" title="Combinar slots com tônica/harmonia ou tocar isolado">
             <option value="combined" selected>Combinados</option>
             <option value="isolated">Isolados</option>
           </select>
         </label>
-        <label class="field slim">
+        <label class="field slim field-compact is-advanced">
           <span>Volume slots</span>
           <input type="range" id="slotsVol" min="0" max="100" value="70" />
         </label>
@@ -257,7 +266,7 @@
   <section class="panel panel-scale-player" aria-label="Tocar escala">
     <h2>Escala completa</h2>
     <div class="row row-scale-exec">
-      <label class="field field-wide">
+      <label class="field field-wide field-hero">
         <span>Escala (execução)</span>
         <select id="scaleType" title="Escala usada na sequência, na faixa de graus, nos slots e na harmonia"></select>
       </label>
@@ -307,7 +316,7 @@
         <span>Oitavas</span>
         <input type="number" id="seqOctaves" min="1" max="4" value="1" />
       </label>
-      <label class="field field-check">
+      <label class="field field-check is-advanced">
         <input type="checkbox" id="seqLatch" checked />
         <span>Encaixe no próximo tempo</span>
       </label>
@@ -315,7 +324,7 @@
         <input type="checkbox" id="seqLoop" />
         <span>Repetir em loop</span>
       </label>
-      <label class="field">
+      <label class="field is-advanced">
         <span>Pausa entre loops</span>
         <select id="seqLoopGap" title="Silêncio entre repetições da escala">
           <option value="0">Sem pausa</option>
@@ -326,9 +335,9 @@
         </select>
       </label>
     </div>
-    <div class="row">
-      <button type="button" id="btnPlayScale" class="btn btn-primary">Tocar escala</button>
-      <button type="button" id="btnStopScale" class="btn">Parar</button>
+    <div class="row row-play-actions">
+      <button type="button" id="btnPlayScale" class="btn btn-primary btn-hero">▶ Tocar escala</button>
+      <button type="button" id="btnStopScale" class="btn">■ Parar</button>
     </div>
   </section>
 
