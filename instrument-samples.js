@@ -347,9 +347,42 @@
         }
       }
       if (!buf) {
-        // Carregamento tardio: não bloqueia a UI; próximas batidas já tocam.
+        // --- Fallback síncrono: vizinho já em cache ---------------------------
+        // Sem isto, cada MIDI novo cala-se na primeira batida enquanto a amostra
+        // é buscada. Em progressões rápidas (ex.: Alberti 1–5–3–5) isso faz
+        // "perder notas" e até faz o MESMO acorde soar diferente em passos
+        // distintos (#2 A cru vs #4 A completo, porque entretanto o cache
+        // encheu). Aqui procuramos o MIDI vizinho já carregado (pref.: um
+        // anchor do instrumento; senão, o cache.key mais próximo) e usamos
+        // o seu buffer com pitch-shift via playbackRate. O custo é 0: já
+        // decodificado, só muda a rate de leitura.
+        const bank = globalThis.HLSoundBank;
+        let nearMidi = null;
+        if (bank && typeof bank.nearestAnchorMidi === "function" && this.fallbackKind) {
+          const anchor = bank.nearestAnchorMidi(this.fallbackKind, midi);
+          if (this.cache.has(anchor)) nearMidi = anchor;
+        }
+        if (nearMidi == null && this.cache.size > 0) {
+          let bestD = Infinity;
+          for (const k of this.cache.keys()) {
+            if (typeof k !== "number" || k < 0) continue;
+            const d = Math.abs(midi - k);
+            if (d < bestD) { bestD = d; nearMidi = k; }
+          }
+          // Limite de segurança: pitch-shift acima de 12 semitons soa péssimo.
+          // Nesses casos prefere-se silenciar e aguardar o carregamento.
+          if (bestD > 12) nearMidi = null;
+        }
+        if (nearMidi != null) {
+          buf = this.cache.get(nearMidi);
+          rate = 2 ** ((midi - nearMidi) / 12);
+          // Não gravamos no cache nem setamos midiResampleRate — assim que
+          // a amostra real chegar (loadOne abaixo), futuras invocações usam-na.
+        }
+        // Dispara sempre o load real em background para substituir o vizinho
+        // pela amostra certa nas próximas batidas.
         void this.loadOne(midi);
-        return false;
+        if (!buf) return false;
       }
 
       const resample = this.midiResampleRate.get(midi) ?? 1;
