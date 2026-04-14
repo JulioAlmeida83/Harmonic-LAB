@@ -279,6 +279,29 @@ input[type="checkbox"]:focus-visible {
   border-right: none;
 }
 
+/* Highlight da nota que está tocando agora na sequência de escala. */
+.degree-col.is-playing {
+  background: linear-gradient(180deg, rgba(255, 196, 88, 0.22), rgba(255, 196, 88, 0.06));
+  box-shadow: inset 0 0 0 2px var(--accent), 0 0 18px -4px var(--accent);
+  transition:
+    background 80ms ease-out,
+    box-shadow 80ms ease-out;
+}
+.degree-col.is-playing .roman {
+  color: #ffd87a;
+  text-shadow: 0 0 8px rgba(255, 196, 88, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .degree-col.is-playing {
+    transition: none;
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+  .degree-col.is-playing .roman {
+    text-shadow: none;
+  }
+}
+
 .roman {
   font-family: var(--mono);
   font-size: 1.05rem;

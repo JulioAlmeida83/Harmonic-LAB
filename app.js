@@ -1099,6 +1099,15 @@ let sampleBassPatIndex = 0;
 let scaleLoopToken = 0;
 let scaleLoopTimer = null;
 
+/** Timers de highlight visual da escala — limpos no stop para evitar ficar "aceso". */
+const scaleHighlightTimers = [];
+function clearScaleHighlights() {
+  for (const t of scaleHighlightTimers) clearTimeout(t);
+  scaleHighlightTimers.length = 0;
+  const strip = document.getElementById("degreeStrip");
+  if (strip) strip.querySelectorAll(".degree-col.is-playing").forEach((el) => el.classList.remove("is-playing"));
+}
+
 function scheduleSyncAudio() {
   if (!audioUserEnabled) return;
   if (syncAudioRaf) cancelAnimationFrame(syncAudioRaf);
@@ -1360,6 +1369,7 @@ function renderDegreeStrip() {
   for (let deg = 1; deg <= MAX_DEGREE_LABEL; deg += 1) {
     const col = document.createElement("div");
     col.className = "degree-col";
+    col.dataset.degree = String(deg);
     const ext = romanForExtendedDegree(ivals, deg);
     const romanEl = document.createElement("div");
     romanEl.className = "roman";
@@ -1937,6 +1947,34 @@ function wireGlobalControls() {
     }
 
     if (myToken !== scaleLoopToken) return;
+
+    // Agenda highlights visuais alinhados com o início/fim de cada nota da sequência.
+    // O engine usa `t0 = ctx.currentTime + 0.06` ao iniciar — replicamos aqui.
+    const ctxNow = audio.ctx?.currentTime ?? 0;
+    const t0Ui = ctxNow + 0.06;
+    const strip = document.getElementById("degreeStrip");
+    if (strip) {
+      for (let i = 0; i < degs.length; i += 1) {
+        const d = degs[i];
+        const startMs = Math.max(0, Math.round((t0Ui + times[i] - ctxNow) * 1000));
+        const endMs = Math.max(startMs + 30, Math.round(startMs + (durs[i] ?? 0.12) * 1000));
+        scaleHighlightTimers.push(
+          setTimeout(() => {
+            if (myToken !== scaleLoopToken) return;
+            const col = strip.querySelector(`.degree-col[data-degree="${d}"]`);
+            if (col) col.classList.add("is-playing");
+          }, startMs),
+        );
+        scaleHighlightTimers.push(
+          setTimeout(() => {
+            if (myToken !== scaleLoopToken) return;
+            const col = strip.querySelector(`.degree-col[data-degree="${d}"]`);
+            if (col) col.classList.remove("is-playing");
+          }, endMs),
+        );
+      }
+    }
+
     await audio.playScaleSequence({ freqs, times, durs, gain: 0.32, mode, midis, sampler });
 
     if (!loopOn || myToken !== scaleLoopToken) return;
@@ -1960,6 +1998,7 @@ function wireGlobalControls() {
       clearTimeout(scaleLoopTimer);
       scaleLoopTimer = null;
     }
+    clearScaleHighlights();
   }
 
   document.getElementById("btnPlayScale").addEventListener("click", () => {

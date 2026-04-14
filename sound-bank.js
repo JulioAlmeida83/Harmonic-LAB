@@ -30,6 +30,33 @@
   /** Se não existirem WAV locais, o sampler pode ir buscar estes URL (CORS OK no raw.githubusercontent). */
   let remoteSamplesEnabled = true;
 
+  /**
+   * Mapeamento kind -> diretório em https://github.com/nbrosowsky/tonejs-instruments (MIT, samples CC-BY 3.0).
+   * É o mesmo pack que `npm run fetch-samples` instala localmente. Quando não há WAVs locais
+   * (ex.: deploy no Pages), usamos estas URLs via `getRemoteSamplePlan`. Os ficheiros seguem
+   * a convenção `{Nota}{oct}.wav`, com `s` para sustenido (ex.: `Cs4.wav`, `As3.wav`).
+   */
+  const TONEJS_BASE = "https://raw.githubusercontent.com/nbrosowsky/tonejs-instruments/master/samples";
+  const TONEJS_SOURCE_DIR = {
+    piano: "piano",
+    rhodes: "organ",
+    cello: "cello",
+    acoustic_bass: "contrabass",
+    jazz_bass: "bass-electric",
+    fender_guitar: "guitar-electric",
+    guitar_distorted: "guitar-electric",
+    acoustic_guitar: "guitar-acoustic",
+    clarinet: "clarinet",
+    native_flute: "flute",
+  };
+
+  const TONEJS_NOTE_NAMES = ["C", "Cs", "D", "Ds", "E", "F", "Fs", "G", "Gs", "A", "As", "B"];
+  function midiToToneJsFile(midi) {
+    const pc = ((midi % 12) + 12) % 12;
+    const oct = Math.floor(midi / 12) - 1;
+    return `${TONEJS_NOTE_NAMES[pc]}${oct}.wav`;
+  }
+
   const BANK = {
     internal: {
       label: "Som interno",
@@ -311,13 +338,37 @@
   }
 
   /**
-   * @param {string} _kind — piano | rhodes | cello (reservado; hoje todos usam o mesmo pack remoto)
+   * Devolve a URL remota da amostra mais próxima para o instrumento pedido.
+   * Primeira tentativa: repo tonejs-instruments (cobre 10 instrumentos do banco).
+   * Último recurso: piano-de-paris (1 oitava) como fallback genérico.
+   *
+   * @param {string} kind — piano | rhodes | cello | acoustic_bass | jazz_bass
+   *   | fender_guitar | guitar_distorted | acoustic_guitar | clarinet | native_flute
    * @param {number} midi
    * @returns {{ url: string, anchorMidi: number } | null}
    */
-  function getRemoteSamplePlan(_kind, midi) {
+  function getRemoteSamplePlan(kind, midi) {
     if (!remoteSamplesEnabled) return null;
     if (typeof midi !== "number" || Number.isNaN(midi)) return null;
+
+    const source = TONEJS_SOURCE_DIR[kind];
+    if (source) {
+      const def = getDefinition(kind);
+      const anchors = Array.isArray(def.anchors) && def.anchors.length ? def.anchors : null;
+      let anchorMidi = midi;
+      if (anchors) {
+        let bestD = Infinity;
+        for (let i = 0; i < anchors.length; i += 1) {
+          const d = Math.abs(midi - anchors[i]);
+          if (d < bestD) {
+            bestD = d;
+            anchorMidi = anchors[i];
+          }
+        }
+      }
+      return { url: `${TONEJS_BASE}/${source}/${midiToToneJsFile(anchorMidi)}`, anchorMidi };
+    }
+
     const anchors = PARIS_REMOTE.anchors;
     let best = anchors[0];
     let bestD = Infinity;
