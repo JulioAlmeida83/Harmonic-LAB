@@ -62,6 +62,7 @@ const {
   pickParentScaleForChord,
   // Sequências
   CHORD_PROGRESSIONS,
+  PROGRESSION_CATEGORIES,
   resolveSequenceStep,
   resolveSequence,
   stepAtBar,
@@ -617,6 +618,34 @@ describe("parseRomanChord — romanos em contexto diatônico", () => {
     assert.throws(() => parseRomanChord("VIII", 0, "major"));
     assert.throws(() => parseRomanChord("xyz", 0, "major"));
   });
+
+  test("dominante secundária V7/V em C → D7", () => {
+    const c = parseRomanChord("V7/V", 0, "major");
+    // V de C = G (pc 7). V7 de G → D7 (raiz D = pc 2, dominant 7).
+    assert.equal(c.rootPc, 2);
+    assert.deepEqual(c.intervals, [0, 4, 7, 10]);
+  });
+
+  test("dominante secundária V7/ii em C → A7", () => {
+    const c = parseRomanChord("V7/ii", 0, "major");
+    // ii de C = D (pc 2). V7 de D → A7 (raiz A = pc 9, dominant 7).
+    assert.equal(c.rootPc, 9);
+    assert.deepEqual(c.intervals, [0, 4, 7, 10]);
+  });
+
+  test("dominante secundária V7/vi em C → E7", () => {
+    const c = parseRomanChord("V7/vi", 0, "major");
+    // vi de C = A (pc 9). V7 de A → E7 (raiz E = pc 4, dominant 7).
+    assert.equal(c.rootPc, 4);
+    assert.deepEqual(c.intervals, [0, 4, 7, 10]);
+  });
+
+  test("dominante secundária V7/IV em C → C7", () => {
+    const c = parseRomanChord("V7/IV", 0, "major");
+    // IV de C = F (pc 5). V7 de F → C7 (raiz C = pc 0, dominant 7).
+    assert.equal(c.rootPc, 0);
+    assert.deepEqual(c.intervals, [0, 4, 7, 10]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -667,11 +696,13 @@ describe("pickParentScaleForChord — melhor escala-pai", () => {
 // ---------------------------------------------------------------------------
 
 describe("CHORD_PROGRESSIONS — catálogo de presets", () => {
-  test("catálogo tem pelo menos 6 presets essenciais", () => {
+  test("catálogo tem presets essenciais e muitos mais", () => {
     const keys = Object.keys(CHORD_PROGRESSIONS);
-    assert.ok(keys.length >= 6, `só ${keys.length} presets`);
+    assert.ok(keys.length >= 50, `só ${keys.length} presets, esperado ≥50`);
     assert.ok("ii_V_I_major" in CHORD_PROGRESSIONS);
     assert.ok("blues_12_major" in CHORD_PROGRESSIONS);
+    assert.ok("I_V_vi_IV_pop" in CHORD_PROGRESSIONS);
+    assert.ok("canon" in CHORD_PROGRESSIONS);
   });
 
   test("cada preset tem label, defaultScale e steps bem formados", () => {
@@ -684,6 +715,35 @@ describe("CHORD_PROGRESSIONS — catálogo de presets", () => {
         assert.ok((step.bars ?? 1) >= 1, `${key} step bars`);
       }
     }
+  });
+
+  test("cada preset resolve sem erro em qualquer tônica (0..11)", () => {
+    for (const [key, preset] of Object.entries(CHORD_PROGRESSIONS)) {
+      for (let tonicPc = 0; tonicPc < 12; tonicPc++) {
+        assert.doesNotThrow(
+          () =>
+            resolveSequence(preset.steps, { tonicPc, scaleKey: preset.defaultScale }),
+          `${key} falhou em tonicPc=${tonicPc}`
+        );
+      }
+    }
+  });
+
+  test("categorias estão registadas em PROGRESSION_CATEGORIES", () => {
+    assert.equal(typeof PROGRESSION_CATEGORIES, "object");
+    const catKeys = new Set(Object.keys(PROGRESSION_CATEGORIES));
+    for (const [key, preset] of Object.entries(CHORD_PROGRESSIONS)) {
+      if (preset.category) {
+        assert.ok(
+          catKeys.has(preset.category),
+          `${key} usa categoria ${preset.category} desconhecida`
+        );
+      }
+    }
+    // Pelo menos algumas categorias-chave existem.
+    assert.ok(catKeys.has("core_pop"));
+    assert.ok(catKeys.has("jazz_bossa_major"));
+    assert.ok(catKeys.has("secondary_dominants"));
   });
 
   test("blues 12 compassos totaliza 12 compassos", () => {

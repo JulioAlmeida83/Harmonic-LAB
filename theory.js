@@ -634,6 +634,26 @@ const ROMAN_NUMERALS_MAP = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7 };
 function parseRomanChord(str, tonicPc = 0, scaleKey = "major") {
   if (typeof str !== "string") throw new Error("parseRomanChord: string esperada");
   const s = str.trim();
+  // Dominantes secundárias (e qualquer X/Y com base em grau): primeiro resolvemos
+  // o alvo Y na escala corrente (para encontrar a sua tónica), depois parseamos
+  // X na escala "major" (padrão para dominantes) usando esse alvo como tónica.
+  // Exemplos: "V/V", "V7/ii", "V7/vi", "bII7/V".
+  const slashIdx = s.indexOf("/");
+  if (slashIdx > 0 && slashIdx < s.length - 1) {
+    const lhs = s.slice(0, slashIdx).trim();
+    const rhs = s.slice(slashIdx + 1).trim();
+    // Só ativamos o modo "dominante secundária" se o RHS parece ser um grau
+    // romano (ex.: "V", "ii", "bVI"), não um slash-bass absoluto ("C/E") que é
+    // uma notação diferente não suportada aqui.
+    if (/^[b#♭♯]?[ivIV]+(°|ø)?$/.test(rhs)) {
+      const target = parseRomanChord(rhs, tonicPc, scaleKey);
+      // Tónica "local" = raiz do alvo. Para dominantes secundárias o contexto
+      // é maior (escala default "major"), mas se o lhs não é um grau de
+      // dominante (ex.: "IV/V"), mantemos a convenção maior — é o uso mais
+      // comum em notação funcional popular.
+      return parseRomanChord(lhs, target.rootPc, "major");
+    }
+  }
   const m = s.match(/^([b#♭♯]?)([ivIV]+)(°|ø)?(.*)$/);
   if (!m) throw new Error(`Romano inválido: ${str}`);
   const [, accRaw, romanRaw, diminutive, tailRaw] = m;
@@ -712,47 +732,62 @@ function pickParentScaleForChord(chord, tonicPc = 0, candidates) {
 
 // --- Progressões pré-definidas ---------------------------------------------
 
+/**
+ * Categorias de presets — usadas para agrupar em <optgroup> no <select> do UI.
+ * A ordem aqui dita a ordem de rendering. Mantida em ordem de "familiaridade"
+ * (core pop primeiro, exóticos por último).
+ */
+const PROGRESSION_CATEGORIES = {
+  core_pop: "Núcleo pop / campo maior",
+  blues_rock: "Blues & rock",
+  pop_punk_worship: "Pop-punk · worship · sertanejo",
+  emotional_vi: "Clichês emotivos com vi",
+  secondary_dominants: "Dominantes secundárias & turnarounds",
+  jazz_bossa_major: "Jazz · bossa · MPB (maior)",
+  modal_lofi: "Modal pop / lo-fi",
+  funk_trap_rnb: "Funk · trap · R&B",
+  jazz_bossa_minor: "Jazz · bossa (menor)",
+  pragmatic: "Variações pragmáticas",
+  classic: "Clássicos & clichês",
+};
+
+/**
+ * Presets de progressões. Cada entrada pode ter:
+ *   - label         → texto no <option>
+ *   - category      → chave em PROGRESSION_CATEGORIES (opcional; default: "pragmatic")
+ *   - defaultScale  → escala global a sugerir ao carregar
+ *   - steps         → array de { roman|chord, bars, scale? }
+ *
+ * Notação romana suportada (ver parseRomanChord):
+ *   I, ii, iii, IV, V, vi, vii°, bVII, #IV, iiø, V7/ii (dominantes secundárias), …
+ */
 const CHORD_PROGRESSIONS = {
-  ii_V_I_major: {
-    label: "ii–V–I maior",
-    defaultScale: "major",
-    steps: [
-      { roman: "ii7", bars: 1 },
-      { roman: "V7", bars: 1 },
-      { roman: "Imaj7", bars: 2 },
-    ],
-  },
-  ii_V_i_minor: {
-    label: "ii°–V7–i menor",
-    defaultScale: "harmonic_minor",
-    steps: [
-      { roman: "iiø", bars: 1 },
-      { roman: "V7", bars: 1 },
-      { roman: "i", bars: 2 },
-    ],
-  },
-  I_vi_ii_V_turnaround: {
-    label: "I–vi–ii–V (turnaround jazz)",
-    defaultScale: "major",
-    steps: [
-      { roman: "Imaj7", bars: 1 },
-      { roman: "vi7", bars: 1 },
-      { roman: "ii7", bars: 1 },
-      { roman: "V7", bars: 1 },
-    ],
-  },
+  // --- Núcleo pop / campo maior ---------------------------------------------
   I_V_vi_IV_pop: {
     label: "I–V–vi–IV (pop)",
+    category: "core_pop",
     defaultScale: "major",
     steps: [
       { roman: "I", bars: 1 },
       { roman: "V", bars: 1 },
       { roman: "vi", bars: 1 },
       { roman: "IV", bars: 1 },
+    ],
+  },
+  vi_IV_I_V_pop: {
+    label: "vi–IV–I–V (pop emo)",
+    category: "core_pop",
+    defaultScale: "major",
+    steps: [
+      { roman: "vi", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "I", bars: 1 },
+      { roman: "V", bars: 1 },
     ],
   },
   I_vi_IV_V_50s: {
     label: "I–vi–IV–V (anos 50)",
+    category: "core_pop",
     defaultScale: "major",
     steps: [
       { roman: "I", bars: 1 },
@@ -761,8 +796,84 @@ const CHORD_PROGRESSIONS = {
       { roman: "V", bars: 1 },
     ],
   },
+  I_IV_V: {
+    label: "I–IV–V",
+    category: "core_pop",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+  I_V_IV: {
+    label: "I–V–IV",
+    category: "core_pop",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "V", bars: 1 },
+      { roman: "IV", bars: 1 },
+    ],
+  },
+  IV_I_V: {
+    label: "IV–I–V (plagal-dominante)",
+    category: "core_pop",
+    defaultScale: "major",
+    steps: [
+      { roman: "IV", bars: 1 },
+      { roman: "I", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+  I_V_I_simple: {
+    label: "I–V–I (cadência simples)",
+    category: "core_pop",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 2 },
+      { roman: "V", bars: 1 },
+      { roman: "I", bars: 1 },
+    ],
+  },
+  vi_V_IV_V: {
+    label: "vi–V–IV–V",
+    category: "core_pop",
+    defaultScale: "major",
+    steps: [
+      { roman: "vi", bars: 1 },
+      { roman: "V", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+  I_V_ii_IV: {
+    label: "I–V–ii–IV",
+    category: "core_pop",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "V", bars: 1 },
+      { roman: "ii", bars: 1 },
+      { roman: "IV", bars: 1 },
+    ],
+  },
+  I_IV_I_V: {
+    label: "I–IV–I–V",
+    category: "core_pop",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "I", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+
+  // --- Blues & rock ---------------------------------------------------------
   blues_12_major: {
     label: "Blues 12 compassos (maior)",
+    category: "blues_rock",
     defaultScale: "mixolydian",
     steps: [
       { roman: "I7", bars: 4 },
@@ -774,18 +885,968 @@ const CHORD_PROGRESSIONS = {
       { roman: "V7", bars: 1 },
     ],
   },
-  andalusian: {
-    label: "Cadência andaluza (i–VII–VI–V)",
+  blues_12_minor: {
+    label: "Blues 12 compassos (menor)",
+    category: "blues_rock",
+    defaultScale: "natural_minor",
+    steps: [
+      { roman: "i7", bars: 4 },
+      { roman: "iv7", bars: 2 },
+      { roman: "i7", bars: 2 },
+      { roman: "V7", bars: 1 },
+      { roman: "iv7", bars: 1 },
+      { roman: "i7", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+  rock_I_bVII_IV: {
+    label: "I–♭VII–IV (rock mixolídio)",
+    category: "blues_rock",
+    defaultScale: "mixolydian",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "bVII", bars: 1 },
+      { roman: "IV", bars: 2 },
+    ],
+  },
+  rock_I_bIII_IV: {
+    label: "I–♭III–IV (rock emprestado)",
+    category: "blues_rock",
+    defaultScale: "mixolydian",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "bIII", bars: 1 },
+      { roman: "IV", bars: 2 },
+    ],
+  },
+  i_bVII_bVI_bVII: {
+    label: "i–♭VII–♭VI–♭VII (rock menor)",
+    category: "blues_rock",
+    defaultScale: "natural_minor",
+    steps: [
+      { roman: "i", bars: 1 },
+      { roman: "bVII", bars: 1 },
+      { roman: "bVI", bars: 1 },
+      { roman: "bVII", bars: 1 },
+    ],
+  },
+  riff_I_bVII_bVI_V: {
+    label: "i–♭VII–♭VI–V (flamenco/rock)",
+    category: "blues_rock",
     defaultScale: "phrygian",
     steps: [
       { roman: "i", bars: 1 },
-      { roman: "VII", bars: 1 },
-      { roman: "VI", bars: 1 },
+      { roman: "bVII", bars: 1 },
+      { roman: "bVI", bars: 1 },
       { roman: "V", bars: 1 },
     ],
   },
+  jam_I_bVII: {
+    label: "I–♭VII (riff aberto)",
+    category: "blues_rock",
+    defaultScale: "mixolydian",
+    steps: [
+      { roman: "I", bars: 2 },
+      { roman: "bVII", bars: 2 },
+    ],
+  },
+  rockabilly_I_IV_I_V: {
+    label: "I–IV–I–V (rockabilly)",
+    category: "blues_rock",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 2 },
+      { roman: "IV", bars: 2 },
+      { roman: "I", bars: 2 },
+      { roman: "V", bars: 2 },
+    ],
+  },
+  hard_i_bVI_bIII_bVII: {
+    label: "i–♭VI–♭III–♭VII (hard rock)",
+    category: "blues_rock",
+    defaultScale: "natural_minor",
+    steps: [
+      { roman: "i", bars: 1 },
+      { roman: "bVI", bars: 1 },
+      { roman: "bIII", bars: 1 },
+      { roman: "bVII", bars: 1 },
+    ],
+  },
+  blues_quick_change: {
+    label: "Blues quick-change (maior)",
+    category: "blues_rock",
+    defaultScale: "mixolydian",
+    steps: [
+      { roman: "I7", bars: 1 },
+      { roman: "IV7", bars: 1 },
+      { roman: "I7", bars: 2 },
+      { roman: "IV7", bars: 2 },
+      { roman: "I7", bars: 2 },
+      { roman: "V7", bars: 1 },
+      { roman: "IV7", bars: 1 },
+      { roman: "I7", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+
+  // --- Pop-punk / worship / sertanejo --------------------------------------
+  pop_punk_I_V_vi_IV: {
+    label: "I–V–vi–IV (pop-punk hino)",
+    category: "pop_punk_worship",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 2 },
+      { roman: "V", bars: 2 },
+      { roman: "vi", bars: 2 },
+      { roman: "IV", bars: 2 },
+    ],
+  },
+  worship_IV_I_V_vi: {
+    label: "IV–I–V–vi (worship build)",
+    category: "pop_punk_worship",
+    defaultScale: "major",
+    steps: [
+      { roman: "IV", bars: 1 },
+      { roman: "I", bars: 1 },
+      { roman: "V", bars: 1 },
+      { roman: "vi", bars: 1 },
+    ],
+  },
+  worship_I_V_IV: {
+    label: "I–V–IV (worship chill)",
+    category: "pop_punk_worship",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 2 },
+      { roman: "V", bars: 1 },
+      { roman: "IV", bars: 1 },
+    ],
+  },
+  sertanejo_I_V_vi_iii_IV: {
+    label: "I–V–vi–iii–IV (sertanejo universitário)",
+    category: "pop_punk_worship",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "V", bars: 1 },
+      { roman: "vi", bars: 1 },
+      { roman: "iii", bars: 1 },
+      { roman: "IV", bars: 1 },
+    ],
+  },
+  sertanejo_I_IV_vi_V: {
+    label: "I–IV–vi–V (sertanejo)",
+    category: "pop_punk_worship",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "vi", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+  worship_vi_IV_I_V_loop: {
+    label: "vi–IV–I–V (worship loop)",
+    category: "pop_punk_worship",
+    defaultScale: "major",
+    steps: [
+      { roman: "vi", bars: 2 },
+      { roman: "IV", bars: 2 },
+      { roman: "I", bars: 2 },
+      { roman: "V", bars: 2 },
+    ],
+  },
+  pop_punk_I_IV_V_vi: {
+    label: "I–IV–V–vi",
+    category: "pop_punk_worship",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "V", bars: 1 },
+      { roman: "vi", bars: 1 },
+    ],
+  },
+  worship_IV_V_iii_vi: {
+    label: "IV–V–iii–vi (bridge worship)",
+    category: "pop_punk_worship",
+    defaultScale: "major",
+    steps: [
+      { roman: "IV", bars: 1 },
+      { roman: "V", bars: 1 },
+      { roman: "iii", bars: 1 },
+      { roman: "vi", bars: 1 },
+    ],
+  },
+  sertanejo_I_V_IV: {
+    label: "I–V–IV (sertanejo raiz)",
+    category: "pop_punk_worship",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 2 },
+      { roman: "V", bars: 2 },
+      { roman: "IV", bars: 2 },
+    ],
+  },
+  worship_I_IV_vi_V: {
+    label: "I–IV–vi–V",
+    category: "pop_punk_worship",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "vi", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+
+  // --- Clichês emotivos com vi ---------------------------------------------
+  vi_IV_V_I: {
+    label: "vi–IV–V–I",
+    category: "emotional_vi",
+    defaultScale: "major",
+    steps: [
+      { roman: "vi", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "V", bars: 1 },
+      { roman: "I", bars: 1 },
+    ],
+  },
+  vi_iii_IV_I: {
+    label: "vi–iii–IV–I",
+    category: "emotional_vi",
+    defaultScale: "major",
+    steps: [
+      { roman: "vi", bars: 1 },
+      { roman: "iii", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "I", bars: 1 },
+    ],
+  },
+  vi_V_IV_I: {
+    label: "vi–V–IV–I (descida)",
+    category: "emotional_vi",
+    defaultScale: "major",
+    steps: [
+      { roman: "vi", bars: 1 },
+      { roman: "V", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "I", bars: 1 },
+    ],
+  },
+  I_iii_IV_vi: {
+    label: "I–iii–IV–vi",
+    category: "emotional_vi",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "iii", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "vi", bars: 1 },
+    ],
+  },
+  vi_ii_V_I_emo: {
+    label: "vi–ii–V–I (jazz-pop)",
+    category: "emotional_vi",
+    defaultScale: "major",
+    steps: [
+      { roman: "vi", bars: 1 },
+      { roman: "ii", bars: 1 },
+      { roman: "V", bars: 1 },
+      { roman: "I", bars: 1 },
+    ],
+  },
+  I_V_vi_iii_IV: {
+    label: "I–V–vi–iii–IV (Canon moderno)",
+    category: "emotional_vi",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "V", bars: 1 },
+      { roman: "vi", bars: 1 },
+      { roman: "iii", bars: 1 },
+      { roman: "IV", bars: 1 },
+    ],
+  },
+  I_iii_vi_IV: {
+    label: "I–iii–vi–IV",
+    category: "emotional_vi",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "iii", bars: 1 },
+      { roman: "vi", bars: 1 },
+      { roman: "IV", bars: 1 },
+    ],
+  },
+  vi_IV_ii_V: {
+    label: "vi–IV–ii–V",
+    category: "emotional_vi",
+    defaultScale: "major",
+    steps: [
+      { roman: "vi", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "ii", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+  IV_vi_I_V: {
+    label: "IV–vi–I–V",
+    category: "emotional_vi",
+    defaultScale: "major",
+    steps: [
+      { roman: "IV", bars: 1 },
+      { roman: "vi", bars: 1 },
+      { roman: "I", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+  vi_I_IV_V: {
+    label: "vi–I–IV–V",
+    category: "emotional_vi",
+    defaultScale: "major",
+    steps: [
+      { roman: "vi", bars: 1 },
+      { roman: "I", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+
+  // --- Dominantes secundárias & turnarounds --------------------------------
+  I_vi_ii_V_turnaround: {
+    label: "I–vi–ii–V (turnaround jazz)",
+    category: "secondary_dominants",
+    defaultScale: "major",
+    steps: [
+      { roman: "Imaj7", bars: 1 },
+      { roman: "vi7", bars: 1 },
+      { roman: "ii7", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+  sec_V_of_V: {
+    label: "I–V/V–V–I (V de V)",
+    category: "secondary_dominants",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "V7/V", bars: 1 },
+      { roman: "V", bars: 1 },
+      { roman: "I", bars: 1 },
+    ],
+  },
+  sec_V_of_vi: {
+    label: "I–V/vi–vi–IV",
+    category: "secondary_dominants",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "V7/vi", bars: 1 },
+      { roman: "vi", bars: 1 },
+      { roman: "IV", bars: 1 },
+    ],
+  },
+  sec_V_of_ii: {
+    label: "I–V/ii–ii–V",
+    category: "secondary_dominants",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "V7/ii", bars: 1 },
+      { roman: "ii", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+  sec_V_of_IV: {
+    label: "I–V/IV–IV–V",
+    category: "secondary_dominants",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "V7/IV", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+  rhythm_changes_A: {
+    label: "Rhythm changes (seção A)",
+    category: "secondary_dominants",
+    defaultScale: "major",
+    steps: [
+      { roman: "Imaj7", bars: 1 },
+      { roman: "vi7", bars: 1 },
+      { roman: "ii7", bars: 1 },
+      { roman: "V7", bars: 1 },
+      { roman: "iii7", bars: 1 },
+      { roman: "vi7", bars: 1 },
+      { roman: "ii7", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+  chain_V_of_chain: {
+    label: "III7–VI7–II7–V7 (cadeia de dominantes)",
+    category: "secondary_dominants",
+    defaultScale: "major",
+    steps: [
+      { roman: "V7/vi", bars: 1 },
+      { roman: "V7/ii", bars: 1 },
+      { roman: "V7/V", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+  backdoor_ii_V_I: {
+    label: "iv–♭VII7–I (backdoor cadence)",
+    category: "secondary_dominants",
+    defaultScale: "major",
+    steps: [
+      { roman: "iv7", bars: 1 },
+      { roman: "bVII7", bars: 1 },
+      { roman: "Imaj7", bars: 2 },
+    ],
+  },
+  tritone_sub_ii_V_I: {
+    label: "ii7–♭II7–Imaj7 (trítono subst.)",
+    category: "secondary_dominants",
+    defaultScale: "major",
+    steps: [
+      { roman: "ii7", bars: 1 },
+      { roman: "bII7", bars: 1 },
+      { roman: "Imaj7", bars: 2 },
+    ],
+  },
+  long_turnaround: {
+    label: "Imaj7–VI7–ii7–V7 (turnaround c/ V/ii)",
+    category: "secondary_dominants",
+    defaultScale: "major",
+    steps: [
+      { roman: "Imaj7", bars: 1 },
+      { roman: "V7/ii", bars: 1 },
+      { roman: "ii7", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+
+  // --- Jazz · bossa · MPB (maior) ------------------------------------------
+  ii_V_I_major: {
+    label: "ii7–V7–Imaj7",
+    category: "jazz_bossa_major",
+    defaultScale: "major",
+    steps: [
+      { roman: "ii7", bars: 1 },
+      { roman: "V7", bars: 1 },
+      { roman: "Imaj7", bars: 2 },
+    ],
+  },
+  ii_V_I_long: {
+    label: "ii7–V7–Imaj7 (estendido)",
+    category: "jazz_bossa_major",
+    defaultScale: "major",
+    steps: [
+      { roman: "ii7", bars: 2 },
+      { roman: "V7", bars: 2 },
+      { roman: "Imaj7", bars: 4 },
+    ],
+  },
+  bossa_Imaj7_IVmaj7: {
+    label: "Imaj7–IVmaj7 (bossa modal)",
+    category: "jazz_bossa_major",
+    defaultScale: "lydian",
+    steps: [
+      { roman: "Imaj7", bars: 2 },
+      { roman: "IVmaj7", bars: 2 },
+    ],
+  },
+  mpb_Imaj7_iii7_vi7_ii7_V7: {
+    label: "Imaj7–iii7–vi7–ii7–V7 (MPB)",
+    category: "jazz_bossa_major",
+    defaultScale: "major",
+    steps: [
+      { roman: "Imaj7", bars: 1 },
+      { roman: "iii7", bars: 1 },
+      { roman: "vi7", bars: 1 },
+      { roman: "ii7", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+  bossa_Imaj7_VI7_ii7_V7: {
+    label: "Imaj7–VI7–ii7–V7 (bossa clássica)",
+    category: "jazz_bossa_major",
+    defaultScale: "major",
+    steps: [
+      { roman: "Imaj7", bars: 1 },
+      { roman: "V7/ii", bars: 1 },
+      { roman: "ii7", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+  mpb_iii7_vi7_ii7_V7: {
+    label: "iii7–vi7–ii7–V7 (Jobim-like)",
+    category: "jazz_bossa_major",
+    defaultScale: "major",
+    steps: [
+      { roman: "iii7", bars: 1 },
+      { roman: "vi7", bars: 1 },
+      { roman: "ii7", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+  jazz_IVmaj7_iv7_I: {
+    label: "IVmaj7–iv7–Imaj7 (empréstimo modal)",
+    category: "jazz_bossa_major",
+    defaultScale: "major",
+    steps: [
+      { roman: "IVmaj7", bars: 1 },
+      { roman: "iv7", bars: 1 },
+      { roman: "Imaj7", bars: 2 },
+    ],
+  },
+  jazz_Imaj7_bIIIdim_ii7_V7: {
+    label: "Imaj7–♭IIIdim–ii7–V7 (passing dim)",
+    category: "jazz_bossa_major",
+    defaultScale: "major",
+    steps: [
+      { roman: "Imaj7", bars: 1 },
+      { roman: "bIII°", bars: 1 },
+      { roman: "ii7", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+  bossa_Imaj7_bVII7: {
+    label: "Imaj7–♭VII7 (bossa modal aberto)",
+    category: "jazz_bossa_major",
+    defaultScale: "mixolydian",
+    steps: [
+      { roman: "Imaj7", bars: 2 },
+      { roman: "bVII7", bars: 2 },
+    ],
+  },
+  jazz_IIm7_V7_Imaj7_VImaj7: {
+    label: "ii7–V7–Imaj7–♭VImaj7",
+    category: "jazz_bossa_major",
+    defaultScale: "major",
+    steps: [
+      { roman: "ii7", bars: 1 },
+      { roman: "V7", bars: 1 },
+      { roman: "Imaj7", bars: 1 },
+      { roman: "bVImaj7", bars: 1 },
+    ],
+  },
+
+  // --- Modal pop / lo-fi ----------------------------------------------------
+  dorian_i_IV: {
+    label: "i–IV (dórico)",
+    category: "modal_lofi",
+    defaultScale: "dorian",
+    steps: [
+      { roman: "i7", bars: 2 },
+      { roman: "IV7", bars: 2 },
+    ],
+  },
+  dorian_i_ii_IV: {
+    label: "i–ii–IV (dórico)",
+    category: "modal_lofi",
+    defaultScale: "dorian",
+    steps: [
+      { roman: "i", bars: 1 },
+      { roman: "ii", bars: 1 },
+      { roman: "IV", bars: 1 },
+    ],
+  },
+  mixo_I_bVII_IV: {
+    label: "I–♭VII–IV (mixolídio)",
+    category: "modal_lofi",
+    defaultScale: "mixolydian",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "bVII", bars: 1 },
+      { roman: "IV", bars: 2 },
+    ],
+  },
+  phrygian_i_bII: {
+    label: "i–♭II (frígio)",
+    category: "modal_lofi",
+    defaultScale: "phrygian",
+    steps: [
+      { roman: "i", bars: 2 },
+      { roman: "bII", bars: 2 },
+    ],
+  },
+  lydian_I_II: {
+    label: "I–II (lídio brilhante)",
+    category: "modal_lofi",
+    defaultScale: "lydian",
+    steps: [
+      { roman: "Imaj7", bars: 2 },
+      { roman: "II7", bars: 2 },
+    ],
+  },
+  lofi_Imaj7_iii7_IVmaj7_iv7: {
+    label: "Imaj7–iii7–IVmaj7–iv7 (lo-fi)",
+    category: "modal_lofi",
+    defaultScale: "major",
+    steps: [
+      { roman: "Imaj7", bars: 1 },
+      { roman: "iii7", bars: 1 },
+      { roman: "IVmaj7", bars: 1 },
+      { roman: "iv7", bars: 1 },
+    ],
+  },
+  aeolian_i_bVI_bIII_bVII: {
+    label: "i–♭VI–♭III–♭VII (pop menor)",
+    category: "modal_lofi",
+    defaultScale: "natural_minor",
+    steps: [
+      { roman: "i", bars: 1 },
+      { roman: "bVI", bars: 1 },
+      { roman: "bIII", bars: 1 },
+      { roman: "bVII", bars: 1 },
+    ],
+  },
+  andalusian: {
+    label: "Cadência andaluza (i–♭VII–♭VI–V)",
+    category: "modal_lofi",
+    defaultScale: "phrygian",
+    steps: [
+      { roman: "i", bars: 1 },
+      { roman: "bVII", bars: 1 },
+      { roman: "bVI", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+  dorian_ii_IV: {
+    label: "ii–IV (dórico mínimo)",
+    category: "modal_lofi",
+    defaultScale: "dorian",
+    steps: [
+      { roman: "ii", bars: 2 },
+      { roman: "IV", bars: 2 },
+    ],
+  },
+  mixo_I_v_IV: {
+    label: "I–v–IV (mixolídio)",
+    category: "modal_lofi",
+    defaultScale: "mixolydian",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "v", bars: 1 },
+      { roman: "IV", bars: 1 },
+    ],
+  },
+
+  // --- Funk · trap · R&B ----------------------------------------------------
+  funk_i_VI: {
+    label: "i–♭VI (vamp funk)",
+    category: "funk_trap_rnb",
+    defaultScale: "natural_minor",
+    steps: [
+      { roman: "i7", bars: 2 },
+      { roman: "bVI7", bars: 2 },
+    ],
+  },
+  funk_i_bVII: {
+    label: "i–♭VII (vamp funk)",
+    category: "funk_trap_rnb",
+    defaultScale: "dorian",
+    steps: [
+      { roman: "i7", bars: 2 },
+      { roman: "bVII7", bars: 2 },
+    ],
+  },
+  rnb_i_III_VI_VII: {
+    label: "i–♭III–♭VI–♭VII (R&B menor)",
+    category: "funk_trap_rnb",
+    defaultScale: "natural_minor",
+    steps: [
+      { roman: "i", bars: 1 },
+      { roman: "bIII", bars: 1 },
+      { roman: "bVI", bars: 1 },
+      { roman: "bVII", bars: 1 },
+    ],
+  },
+  trap_i_bVI_bVII: {
+    label: "i–♭VI–♭VII (trap)",
+    category: "funk_trap_rnb",
+    defaultScale: "natural_minor",
+    steps: [
+      { roman: "i", bars: 2 },
+      { roman: "bVI", bars: 1 },
+      { roman: "bVII", bars: 1 },
+    ],
+  },
+  rnb_i_iv_bVII: {
+    label: "i–iv–♭VII",
+    category: "funk_trap_rnb",
+    defaultScale: "natural_minor",
+    steps: [
+      { roman: "i", bars: 1 },
+      { roman: "iv", bars: 1 },
+      { roman: "bVII", bars: 2 },
+    ],
+  },
+  rnb_i_V7_iv_bVI: {
+    label: "i–V7–iv–♭VI",
+    category: "funk_trap_rnb",
+    defaultScale: "harmonic_minor",
+    steps: [
+      { roman: "i", bars: 1 },
+      { roman: "V7", bars: 1 },
+      { roman: "iv", bars: 1 },
+      { roman: "bVI", bars: 1 },
+    ],
+  },
+  neosoul_ii_V_i: {
+    label: "iiø–V7alt–i (neo-soul)",
+    category: "funk_trap_rnb",
+    defaultScale: "harmonic_minor",
+    steps: [
+      { roman: "iiø", bars: 1 },
+      { roman: "V7", bars: 1 },
+      { roman: "i", bars: 2 },
+    ],
+  },
+  funk_III7_VI7_II7_V7: {
+    label: "V7/vi–V7/ii–V7/V–V7 (funk turnaround)",
+    category: "funk_trap_rnb",
+    defaultScale: "major",
+    steps: [
+      { roman: "V7/vi", bars: 1 },
+      { roman: "V7/ii", bars: 1 },
+      { roman: "V7/V", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+  rnb_IVmaj7_iii7_ii7_I: {
+    label: "IVmaj7–iii7–ii7–Imaj7 (R&B descida)",
+    category: "funk_trap_rnb",
+    defaultScale: "major",
+    steps: [
+      { roman: "IVmaj7", bars: 1 },
+      { roman: "iii7", bars: 1 },
+      { roman: "ii7", bars: 1 },
+      { roman: "Imaj7", bars: 1 },
+    ],
+  },
+  trap_i_bII: {
+    label: "i–♭II (trap frígio)",
+    category: "funk_trap_rnb",
+    defaultScale: "phrygian",
+    steps: [
+      { roman: "i", bars: 2 },
+      { roman: "bII", bars: 2 },
+    ],
+  },
+
+  // --- Jazz · bossa (menor) -------------------------------------------------
+  ii_V_i_minor: {
+    label: "iiø–V7–i menor",
+    category: "jazz_bossa_minor",
+    defaultScale: "harmonic_minor",
+    steps: [
+      { roman: "iiø", bars: 1 },
+      { roman: "V7", bars: 1 },
+      { roman: "i", bars: 2 },
+    ],
+  },
+  minor_blues_12: {
+    label: "Blues menor 12 compassos",
+    category: "jazz_bossa_minor",
+    defaultScale: "natural_minor",
+    steps: [
+      { roman: "i7", bars: 4 },
+      { roman: "iv7", bars: 2 },
+      { roman: "i7", bars: 2 },
+      { roman: "bVI7", bars: 1 },
+      { roman: "V7", bars: 1 },
+      { roman: "i7", bars: 2 },
+    ],
+  },
+  minor_vamp_i_iv: {
+    label: "i–iv (vamp menor)",
+    category: "jazz_bossa_minor",
+    defaultScale: "natural_minor",
+    steps: [
+      { roman: "i7", bars: 2 },
+      { roman: "iv7", bars: 2 },
+    ],
+  },
+  minor_ii_V_i_VI: {
+    label: "iiø–V7–i–♭VImaj7",
+    category: "jazz_bossa_minor",
+    defaultScale: "harmonic_minor",
+    steps: [
+      { roman: "iiø", bars: 1 },
+      { roman: "V7", bars: 1 },
+      { roman: "i", bars: 1 },
+      { roman: "bVImaj7", bars: 1 },
+    ],
+  },
+  minor_i_bVII_bVI_V: {
+    label: "i–♭VII–♭VI–V (flamenco)",
+    category: "jazz_bossa_minor",
+    defaultScale: "harmonic_minor",
+    steps: [
+      { roman: "i", bars: 1 },
+      { roman: "bVII", bars: 1 },
+      { roman: "bVI", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+  minor_i_VI_iiø_V: {
+    label: "i–♭VI–iiø–V7",
+    category: "jazz_bossa_minor",
+    defaultScale: "harmonic_minor",
+    steps: [
+      { roman: "i", bars: 1 },
+      { roman: "bVI", bars: 1 },
+      { roman: "iiø", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+  minor_i_iv_V7: {
+    label: "i–iv–V7",
+    category: "jazz_bossa_minor",
+    defaultScale: "harmonic_minor",
+    steps: [
+      { roman: "i", bars: 1 },
+      { roman: "iv", bars: 1 },
+      { roman: "V7", bars: 2 },
+    ],
+  },
+  bossa_minor_i_ii_V: {
+    label: "i7–iiø–V7 (bossa menor)",
+    category: "jazz_bossa_minor",
+    defaultScale: "harmonic_minor",
+    steps: [
+      { roman: "i7", bars: 2 },
+      { roman: "iiø", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+  minor_modal_i_bIII: {
+    label: "i–♭III (modal menor)",
+    category: "jazz_bossa_minor",
+    defaultScale: "natural_minor",
+    steps: [
+      { roman: "i", bars: 2 },
+      { roman: "bIII", bars: 2 },
+    ],
+  },
+  minor_turnaround: {
+    label: "i–iv–V7–i (cadência menor)",
+    category: "jazz_bossa_minor",
+    defaultScale: "harmonic_minor",
+    steps: [
+      { roman: "i", bars: 1 },
+      { roman: "iv", bars: 1 },
+      { roman: "V7", bars: 1 },
+      { roman: "i", bars: 1 },
+    ],
+  },
+
+  // --- Variações pragmáticas -----------------------------------------------
+  one_chord_vamp: {
+    label: "I vamp (1 acorde, 4 comp.)",
+    category: "pragmatic",
+    defaultScale: "major",
+    steps: [{ roman: "I", bars: 4 }],
+  },
+  two_chord_I_IV: {
+    label: "I–IV (vamp)",
+    category: "pragmatic",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 2 },
+      { roman: "IV", bars: 2 },
+    ],
+  },
+  two_chord_I_V: {
+    label: "I–V (vamp)",
+    category: "pragmatic",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 2 },
+      { roman: "V", bars: 2 },
+    ],
+  },
+  two_chord_vi_IV: {
+    label: "vi–IV (vamp)",
+    category: "pragmatic",
+    defaultScale: "major",
+    steps: [
+      { roman: "vi", bars: 2 },
+      { roman: "IV", bars: 2 },
+    ],
+  },
+  four_chord_I_vi_IV_V_long: {
+    label: "I–vi–IV–V (2 comp. cada)",
+    category: "pragmatic",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 2 },
+      { roman: "vi", bars: 2 },
+      { roman: "IV", bars: 2 },
+      { roman: "V", bars: 2 },
+    ],
+  },
+  four_chord_I_V_vi_IV_long: {
+    label: "I–V–vi–IV (2 comp. cada)",
+    category: "pragmatic",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 2 },
+      { roman: "V", bars: 2 },
+      { roman: "vi", bars: 2 },
+      { roman: "IV", bars: 2 },
+    ],
+  },
+  I_IV_vi_V_slow: {
+    label: "I–IV–vi–V (lento)",
+    category: "pragmatic",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 4 },
+      { roman: "IV", bars: 4 },
+      { roman: "vi", bars: 4 },
+      { roman: "V", bars: 4 },
+    ],
+  },
+  I_iii_IV: {
+    label: "I–iii–IV",
+    category: "pragmatic",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "iii", bars: 1 },
+      { roman: "IV", bars: 2 },
+    ],
+  },
+  I_iii_vi: {
+    label: "I–iii–vi",
+    category: "pragmatic",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "iii", bars: 1 },
+      { roman: "vi", bars: 2 },
+    ],
+  },
+  I_ii_IV_V: {
+    label: "I–ii–IV–V",
+    category: "pragmatic",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "ii", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+
+  // --- Clássicos ------------------------------------------------------------
   canon: {
     label: "Canon (I–V–vi–iii–IV–I–IV–V)",
+    category: "classic",
     defaultScale: "major",
     steps: [
       { roman: "I", bars: 1 },
@@ -932,6 +1993,7 @@ function stepAtBar(resolvedSteps, barIndex) {
   pickParentScaleForChord,
   // Sequências de acordes
   CHORD_PROGRESSIONS,
+  PROGRESSION_CATEGORIES,
   resolveSequenceStep,
   resolveSequence,
   stepAtBar,

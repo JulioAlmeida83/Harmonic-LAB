@@ -1565,7 +1565,8 @@ const progState = {
   steps: [],          // raw steps [{roman?, chord?, bars, scale?}]
   resolved: [],       // resolvidos via resolveSequenceStep
   beatCounter: 0,     // beats acumulados desde o start do loop
-  lastStepIndex: -1,  // para detectar transições
+  lastStepIndex: -1,  // para detectar transições de step
+  lastBarIndex: -1,   // para detectar transições de compasso dentro do step
 };
 
 /** 4 beats = 1 compasso (apenas 4/4 por agora). */
@@ -1728,8 +1729,19 @@ function progRenderEditor(rawSteps) {
   if (!editor) return;
   editor.innerHTML = "";
   rawSteps.forEach((s, i) => editor.appendChild(progRenderRow(s, i)));
+  // Restaura o highlight após (re)render — especialmente útil ao carregar um
+  // preset enquanto a sequência já está em execução.
+  progRenderStatus();
 }
 
+/**
+ * Atualiza o status textual («Compasso X/Y do step #N…») e destaca visualmente
+ * o cartão do step em execução. Chamada:
+ *   - a cada mudança de passo/step (em `progTickBeat`);
+ *   - a cada mudança de compasso dentro do step (para o contador X/Y);
+ *   - ao (re)renderizar o editor (para restaurar o highlight);
+ *   - ao ligar o áudio (via `progResetPlayhead`).
+ */
 function progRenderStatus() {
   const now = document.getElementById("progNowPlaying");
   if (!now) return;
@@ -1748,26 +1760,78 @@ function progRenderStatus() {
   const scaleLabel = SCALE_TYPES[at.step.scale]?.label || at.step.scale;
   now.textContent = `Compasso ${at.barInStep + 1}/${at.step.bars} do step #${at.index + 1} · ${chordLabel} · ${scaleLabel} (ciclo de ${totalBars} comp.)`;
 
-  // Destaque visual no step ativo.
+  // Destaque visual no step ativo + indicador de compasso interno.
   const editor = document.getElementById("progStepsEditor");
   if (editor) {
     const rows = editor.querySelectorAll(".prog-step");
+    let activeRow = null;
     rows.forEach((row, i) => {
-      row.classList.toggle("is-active", i === at.index);
+      const isActive = i === at.index;
+      row.classList.toggle("is-active", isActive);
+      row.setAttribute("aria-current", isActive ? "true" : "false");
+      if (isActive) {
+        activeRow = row;
+        // Progresso interno (compasso actual / total dentro do step), útil em
+        // progressões onde um acorde dura 2+ compassos (ex: blues 12).
+        const pct = Math.min(100, Math.round(((at.barInStep + 1) / at.step.bars) * 100));
+        row.style.setProperty("--prog-step-bar", pct + "%");
+        row.dataset.barInStep = String(at.barInStep + 1);
+        row.dataset.barTotal = String(at.step.bars);
+      } else {
+        row.style.removeProperty("--prog-step-bar");
+        delete row.dataset.barInStep;
+        delete row.dataset.barTotal;
+      }
     });
+    // Rola o step ativo para ficar visível em progressões longas (sem
+    // animação abrupta: scrollIntoView default já é suave quando o
+    // utilizador tem 'prefers-reduced-motion' desativado).
+    if (activeRow && typeof activeRow.scrollIntoView === "function") {
+      try {
+        activeRow.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+      } catch {
+        /* browsers antigos: ignora */
+      }
+    }
   }
 }
 
 function progPopulatePresets() {
   const sel = document.getElementById("progPreset");
   if (!sel) return;
-  // Mantém a primeira opção "— escolher —".
-  sel.querySelectorAll("option:not(:first-child)").forEach((o) => o.remove());
+  // Mantém a primeira opção "— escolher —" e remove tudo o resto (optgroups
+  // eventualmente criados em render anterior + options sem grupo).
+  [...sel.children].forEach((c, i) => {
+    if (i === 0 && c.tagName === "OPTION" && !c.value) return;
+    c.remove();
+  });
+
+  // Agrupa presets por categoria preservando a ordem de `PROGRESSION_CATEGORIES`.
+  const groups = {};
+  const defaultCat = "pragmatic";
   for (const [key, def] of Object.entries(CHORD_PROGRESSIONS)) {
-    const o = document.createElement("option");
-    o.value = key;
-    o.textContent = def.label;
-    sel.appendChild(o);
+    const cat = def.category || defaultCat;
+    (groups[cat] = groups[cat] || []).push([key, def]);
+  }
+
+  const catLabels =
+    (typeof PROGRESSION_CATEGORIES === "object" && PROGRESSION_CATEGORIES) || {};
+  const catOrder = Object.keys(catLabels).concat(
+    Object.keys(groups).filter((k) => !(k in catLabels))
+  );
+
+  for (const catKey of catOrder) {
+    const entries = groups[catKey];
+    if (!entries || !entries.length) continue;
+    const og = document.createElement("optgroup");
+    og.label = catLabels[catKey] || catKey;
+    for (const [key, def] of entries) {
+      const o = document.createElement("option");
+      o.value = key;
+      o.textContent = def.label;
+      og.appendChild(o);
+    }
+    sel.appendChild(og);
   }
 }
 
@@ -1797,7 +1861,9 @@ function progTickBeat() {
   const barIdx = Math.floor(progState.beatCounter / PROG_BEATS_PER_BAR);
   const at = stepAtBar(progState.resolved, barIdx);
   if (!at) return;
-  if (at.index !== progState.lastStepIndex) {
+  const stepChanged = at.index !== progState.lastStepIndex;
+  const barChanged = barIdx !== progState.lastBarIndex;
+  if (stepChanged) {
     progState.lastStepIndex = at.index;
     if (progState.applyScale) {
       const scaleSel = document.getElementById("scaleType");
@@ -1806,7 +1872,11 @@ function progTickBeat() {
         scaleSel.dispatchEvent(new Event("change", { bubbles: true }));
       }
     }
-    // Atualiza status (fora do rAF — aceitável; roda 1x por step, não por beat).
+  }
+  if (stepChanged || barChanged) {
+    progState.lastBarIndex = barIdx;
+    // Atualiza status em cada mudança de compasso para dar feedback visual
+    // ao vivo em acordes que duram múltiplos compassos (ex.: blues de 12).
     progRenderStatus();
   }
 }
@@ -1815,6 +1885,10 @@ function progTickBeat() {
 function progResetPlayhead() {
   progState.beatCounter = 0;
   progState.lastStepIndex = -1;
+  progState.lastBarIndex = -1;
+  // Força um render imediato para que o highlight apareça já no compasso 0
+  // assim que o áudio arranca, e desapareça assim que o user pausa.
+  progRenderStatus();
 }
 
 /**

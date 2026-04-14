@@ -812,12 +812,46 @@ input[type="checkbox"]:focus-visible {
   background: var(--panel);
   color: var(--text);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  position: relative;
+  overflow: hidden;
+  transition:
+    border-color 120ms ease,
+    box-shadow 160ms ease,
+    background-color 200ms ease,
+    transform 140ms ease;
 }
 
 .prog-step.is-active {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(108, 156, 255, 0.35);
   background: #1c2538;
+  transform: translateY(-1px);
+}
+
+/* Barra fina no rodapé do step activo: ocupa 0 → 100% conforme progride
+   o compasso dentro do step (útil em acordes que duram vários compassos). */
+.prog-step.is-active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  width: var(--prog-step-bar, 0%);
+  background: linear-gradient(90deg, var(--accent), #8fb4ff);
+  transition: width 180ms linear;
+  pointer-events: none;
+}
+
+/* Respeita preferências do user: sem animações abruptas. */
+@media (prefers-reduced-motion: reduce) {
+  .prog-step,
+  .prog-step.is-active::after {
+    transition: none;
+  }
+  .prog-step.is-active {
+    transform: none;
+  }
 }
 
 .prog-step input,
