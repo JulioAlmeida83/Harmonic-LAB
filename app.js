@@ -1357,6 +1357,105 @@ function preferFlats() {
   return document.getElementById("preferFlats").checked;
 }
 
+/** Rótulo do passo entre dois graus consecutivos, em número de semitons. */
+function stepLabel(semitones) {
+  if (semitones === 1) return { text: "S", title: "semitom (1)" };
+  if (semitones === 2) return { text: "T", title: "tom (2)" };
+  if (semitones === 3) return { text: "T+S", title: "1 tom e meio (3 semitons)" };
+  if (semitones === 4) return { text: "2T", title: "2 tons (4 semitons)" };
+  return { text: `${semitones}`, title: `${semitones} semitons` };
+}
+
+/** Devolve os passos (em semitons) entre graus consecutivos da escala, fechando na oitava. */
+function scaleSteps(ivals) {
+  const n = ivals.length;
+  const steps = [];
+  for (let i = 0; i < n; i += 1) {
+    const next = i + 1 < n ? ivals[i + 1] : ivals[0] + 12;
+    steps.push(next - ivals[i]);
+  }
+  return steps;
+}
+
+/**
+ * Renderiza o cabeçalho da escala atual: nome + diagrama de passos T/S +
+ * faixa cromática (12 segmentos) destacando os pitches que pertencem à escala.
+ */
+function renderScaleMeta() {
+  const host = document.getElementById("scaleMeta");
+  if (!host) return;
+  host.innerHTML = "";
+
+  const ivals = currentIvals();
+  const tcp = currentTonicPc();
+  const pf = preferFlats();
+  const scaleKey = document.getElementById("scaleType").value;
+  const scaleLabel = SCALE_TYPES[scaleKey]?.label ?? scaleKey;
+  const tonicName = pcToName(tcp, pf);
+
+  // Título: tônica + nome da escala + nº de notas por oitava
+  const title = document.createElement("div");
+  title.className = "scale-title";
+  const tonicEl = document.createElement("span");
+  tonicEl.className = "scale-title-tonic";
+  tonicEl.textContent = tonicName;
+  const nameEl = document.createElement("span");
+  nameEl.className = "scale-title-name";
+  nameEl.textContent = scaleLabel;
+  const countEl = document.createElement("span");
+  countEl.className = "scale-title-count";
+  countEl.textContent = `${ivals.length} notas / oitava`;
+  title.appendChild(tonicEl);
+  title.appendChild(nameEl);
+  title.appendChild(countEl);
+  host.appendChild(title);
+
+  // Diagrama de passos T/S (largura proporcional ao tamanho do intervalo)
+  const stepsRow = document.createElement("div");
+  stepsRow.className = "scale-steps";
+  const stepsLabel = document.createElement("span");
+  stepsLabel.className = "scale-steps-label";
+  stepsLabel.textContent = "Passos:";
+  stepsRow.appendChild(stepsLabel);
+  const stepsTrack = document.createElement("div");
+  stepsTrack.className = "scale-steps-track";
+  const steps = scaleSteps(ivals);
+  for (const s of steps) {
+    const cell = document.createElement("div");
+    cell.className = `scale-step scale-step-${s}`;
+    cell.style.flex = String(s);
+    const lbl = stepLabel(s);
+    cell.textContent = lbl.text;
+    cell.title = lbl.title;
+    stepsTrack.appendChild(cell);
+  }
+  stepsRow.appendChild(stepsTrack);
+  host.appendChild(stepsRow);
+
+  // Faixa cromática: 12 segmentos, destaca os pitches que pertencem à escala.
+  const chromaRow = document.createElement("div");
+  chromaRow.className = "scale-chroma";
+  const chromaLabel = document.createElement("span");
+  chromaLabel.className = "scale-chroma-label";
+  chromaLabel.textContent = "Cromática:";
+  chromaRow.appendChild(chromaLabel);
+  const chromaTrack = document.createElement("div");
+  chromaTrack.className = "scale-chroma-track";
+  const inScalePc = new Set(ivals.map((iv) => (tcp + iv) % 12));
+  for (let i = 0; i < 12; i += 1) {
+    const pc = (tcp + i) % 12;
+    const cell = document.createElement("div");
+    cell.className = "scale-chroma-cell";
+    if (inScalePc.has(pc)) cell.classList.add("is-in");
+    if (i === 0) cell.classList.add("is-tonic");
+    cell.textContent = pcToName(pc, pf);
+    cell.title = inScalePc.has(pc) ? "pertence à escala" : "fora da escala";
+    chromaTrack.appendChild(cell);
+  }
+  chromaRow.appendChild(chromaTrack);
+  host.appendChild(chromaRow);
+}
+
 function renderDegreeStrip() {
   const strip = document.getElementById("degreeStrip");
   strip.innerHTML = "";
@@ -1774,6 +1873,7 @@ function wireGlobalControls() {
   const onContextChange = () => {
     updateSampleControlsEnabled();
     syncBankSamplerFromUI();
+    renderScaleMeta();
     renderDegreeStrip();
     refreshAllSlotsUI();
     updateSlotsMissingNotes();
@@ -2033,6 +2133,7 @@ function wireGlobalControls() {
 
 // init
 populateSelects();
+renderScaleMeta();
 renderDegreeStrip();
 buildSlots();
 applySlotInputModeChrome();
