@@ -490,18 +490,6 @@ function updateSlotChordLabel() {
 
 // --- Harmonia base (triades / V7 diatônico) ---------------------------------
 
-/**
- * Intervalos de referência usados para construir o acorde da harmonia base
- * (e a linha de baixo que o acompanha). Sempre em Jônica (maior natural),
- * para que o graus I–VII / V7 produzam o acorde convencional mesmo quando
- * a escala *tocada* em cima é outra (ex: Lídia, pentatônica, blues…).
- * Assim mudar o «Tipo de escala» não altera o som da harmonia.
- */
-const HARMONY_REF_IVALS = [0, 2, 4, 5, 7, 9, 11];
-function harmonyRefIvals() {
-  return HARMONY_REF_IVALS;
-}
-
 function harmonyMidis(tonicPc, ivals, harmonyId, baseOct) {
   if (harmonyId === "off") return [];
   if (/^deg[1-7]$/.test(harmonyId)) {
@@ -530,9 +518,8 @@ function currentChordPCsArray() {
   const harmId = document.getElementById("harmonyBase")?.value || "off";
   if (harmId === "off") return null;
   const tcp = currentTonicPc();
-  // Acorde de referência é sempre diatónico da maior — estável independente
-  // da escala selecionada (coerente com o som emitido).
-  const midis = harmonyMidis(tcp, harmonyRefIvals(), harmId, 4);
+  const ivals = currentIvals();
+  const midis = harmonyMidis(tcp, ivals, harmId, 4);
   if (!midis.length) return null;
   return midis.map((m) => (((m - tcp) % 12) + 12) % 12);
 }
@@ -631,26 +618,24 @@ function nextHarmonyBassMidi(tonicPc, ivals, harmonyId, baseOct, mode, step) {
   if (harmonyId === "off") return null;
 
   const off = readHarmonyBassSemitoneOffset();
-  // Baixo sempre deriva do acorde *de referência* (maior natural), coerente com
-  // o acorde emitido em syncAudio / sampleBass — desacoplado do «Tipo de escala».
-  const refIvals = harmonyRefIvals();
 
   if (mode === "pedal_tonic") {
-    return midiForScaleDegree(tonicPc, refIvals, 1, baseOct) + off;
+    return midiForScaleDegree(tonicPc, ivals, 1, baseOct) + off;
   }
 
-  const harm = harmonyMidis(tonicPc, refIvals, harmonyId, baseOct);
+  const harm = harmonyMidis(tonicPc, ivals, harmonyId, baseOct);
   if (!harm.length) return null;
 
   const root = harm[0];
   const third = harm.length > 1 ? harm[1] : root + 4;
   const fifth = harm.length > 2 ? harm[2] : root + 7;
-  // Para acordes diatônicos em tríade (deg1–deg7), deriva a 7ª diatônica
-  // on-the-fly usando os mesmos intervalos de referência.
+  // Para acordes diatônicos em tríade (deg1–deg7), deriva a 7ª diatônica da escala
+  // on-the-fly quando o padrão de baixo precisa dela (evita cair silenciosamente
+  // para a 5ª nos modos root_seventh, arp_low, arp_desc_low, shell_73).
   let seventh = harm.length > 3 ? harm[3] : null;
   if (seventh == null && /^deg[1-7]$/.test(harmonyId)) {
     const g = Number(harmonyId.slice(3));
-    seventh = midiForScaleDegree(tonicPc, refIvals, g + 6, baseOct);
+    seventh = midiForScaleDegree(tonicPc, ivals, g + 6, baseOct);
   }
 
   const br = root + off;
@@ -1319,7 +1304,7 @@ function refreshSampleExecutionLoop() {
     const harmIdRaw = document.getElementById("harmonyBase")?.value ?? "off";
     const muteHarmChords = harmonyChordSamplesMuted();
     if (!slotsIsolated && harmIdRaw !== "off" && !muteHarmChords && audio.harmStabBus) {
-      const harmMidis = harmonyMidis(tcp, harmonyRefIvals(), harmIdRaw, baseOct);
+      const harmMidis = harmonyMidis(tcp, ivals, harmIdRaw, baseOct);
       const harmVol = Number(document.getElementById("harmVol").value) / 100;
       const peak = Math.max(0.04, Math.min(0.16, harmVol * 0.14));
       const harmonyStyle = document.getElementById("harmonyStyle")?.value || "sustain";
@@ -1345,7 +1330,7 @@ function refreshSampleExecutionLoop() {
     const bassMode = document.getElementById("harmonyBassMode")?.value ?? "off";
     const harmIdForBass = effectiveHarmonyIdForBassSamples(harmIdRaw);
     if (!slotsIsolated && harmIdForBass !== "off" && bassMode !== "off" && audio.instrumentSampler) {
-      const bMidiRaw = nextHarmonyBassMidi(tcp, harmonyRefIvals(), harmIdForBass, baseOct, bassMode, sampleBassPatIndex);
+      const bMidiRaw = nextHarmonyBassMidi(tcp, ivals, harmIdForBass, baseOct, bassMode, sampleBassPatIndex);
       sampleBassPatIndex += 1;
       if (bMidiRaw != null) {
         // Em vez de clamp (que dobra notas para a mesma altura nos extremos),
@@ -1852,7 +1837,7 @@ function syncAudio() {
 
   const harmId = document.getElementById("harmonyBase").value;
   const muteHarmChords = harmonyChordSamplesMuted();
-  const harmMidis = harmonyMidis(tcp, harmonyRefIvals(), harmId, baseOct);
+  const harmMidis = harmonyMidis(tcp, ivals, harmId, baseOct);
   const freqsH = harmMidis.map((m) => midiToFreq(m));
   audio.setHarmony(
     freqsH,
@@ -1871,10 +1856,9 @@ function syncAudio() {
   } else if (harmId === "off" || harmMidis.length === 0 || muteHarmChords) {
     audio._harmStabKey = "";
   } else if (audio.instrumentSampler && audio.harmStabBus) {
-    // Sem `scaleKey` no hash: o acorde independe da escala, então mudar o
-    // «Tipo de escala» não deve re-disparar um stab da harmonia.
+    const scaleKey = document.getElementById("scaleType").value;
     const style = document.getElementById("harmonyStyle")?.value || "sustain";
-    const hk = `${tcp}|${harmId}|${style}|${muteHarmChords ? 1 : 0}`;
+    const hk = `${tcp}|${scaleKey}|${harmId}|${style}|${muteHarmChords ? 1 : 0}`;
     if (!audio._harmStabPrimed) {
       audio._harmStabPrimed = true;
       audio._harmStabKey = hk;
