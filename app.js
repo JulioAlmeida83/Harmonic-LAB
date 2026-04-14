@@ -507,6 +507,93 @@ function harmonyChordSamplesMuted() {
   return document.getElementById("harmonyMuteChords")?.checked ?? false;
 }
 
+// --- Compatibilidade escala × acorde (estrelas no #scaleType) ---------------
+
+/**
+ * Array ordenado de pitch-classes (0..11) do acorde da harmonia base atual,
+ * relativo à tônica, na ordem [fundamental, 3ª, 5ª, 7ª?]. Retorna `null` se
+ * harmonia está desligada.
+ */
+function currentChordPCsArray() {
+  const harmId = document.getElementById("harmonyBase")?.value || "off";
+  if (harmId === "off") return null;
+  const tcp = currentTonicPc();
+  const ivals = currentIvals();
+  const midis = harmonyMidis(tcp, ivals, harmId, 4);
+  if (!midis.length) return null;
+  return midis.map((m) => (((m - tcp) % 12) + 12) % 12);
+}
+
+/**
+ * Rating 0..3 de uma escala candidata sobre o acorde atual.
+ *
+ * Regras:
+ *   - Fundamental e 3ª são obrigatórias; se faltar qualquer uma → 0★
+ *     (choque de qualidade, a escala nega o acorde).
+ *   - 5ª e 7ª faltantes são penalidade leve (-1 cada); permite que
+ *     pentatônicas e hexatônicas ainda pontuem bem quando cobrem 1–3–5.
+ *   - Avoid note (semitom acima de uma nota do acorde, dentro da escala
+ *     e fora do acorde): -1 por ocorrência.
+ *   - Score final clamped em [0, 3].
+ */
+function rateScaleAgainstChord(scaleKey, chordPCArr) {
+  if (!chordPCArr || !chordPCArr.length) return 0;
+  const scale = SCALE_TYPES[scaleKey];
+  if (!scale) return 0;
+  const scalePCs = new Set(scale.intervals);
+  const chordPCs = new Set(chordPCArr);
+
+  const root = chordPCArr[0];
+  const third = chordPCArr.length > 1 ? chordPCArr[1] : null;
+  const fifth = chordPCArr.length > 2 ? chordPCArr[2] : null;
+  const seventh = chordPCArr.length > 3 ? chordPCArr[3] : null;
+
+  if (!scalePCs.has(root)) return 0;
+  if (third != null && !scalePCs.has(third)) return 0;
+
+  let score = 3;
+  if (fifth != null && !scalePCs.has(fifth)) score -= 1;
+  if (seventh != null && !scalePCs.has(seventh)) score -= 1;
+
+  let avoid = 0;
+  chordPCs.forEach((pc) => {
+    const above = (pc + 1) % 12;
+    if (scalePCs.has(above) && !chordPCs.has(above)) avoid += 1;
+  });
+  score -= avoid;
+
+  return Math.max(0, Math.min(3, score));
+}
+
+/** Render compacto: "★★★", "★★☆", "★☆☆", "☆☆☆". */
+function scaleStarsRender(n) {
+  if (n == null || n < 0) return "";
+  const r = Math.max(0, Math.min(3, n));
+  return "★".repeat(r) + "☆".repeat(3 - r);
+}
+
+/**
+ * Atualiza o texto das <option> do #scaleType com o rating atual.
+ * Sem harmonia selecionada, mostra só o nome (sem estrelas).
+ */
+function updateScaleStarLabels() {
+  const select = document.getElementById("scaleType");
+  if (!select) return;
+  const chordPCs = currentChordPCsArray();
+  for (const opt of select.options) {
+    const key = opt.value;
+    const base = SCALE_TYPES[key]?.label || key;
+    if (!chordPCs || !chordPCs.length) {
+      opt.textContent = base;
+      opt.removeAttribute("data-fit");
+    } else {
+      const r = rateScaleAgainstChord(key, chordPCs);
+      opt.textContent = `${scaleStarsRender(r)}  ${base}`;
+      opt.setAttribute("data-fit", String(r));
+    }
+  }
+}
+
 /** Com «harmonia desligada», baixo pode usar tríade em I como referência. */
 function effectiveHarmonyIdForBassSamples(harmId) {
   if (harmId !== "off") return harmId;
@@ -542,7 +629,14 @@ function nextHarmonyBassMidi(tonicPc, ivals, harmonyId, baseOct, mode, step) {
   const root = harm[0];
   const third = harm.length > 1 ? harm[1] : root + 4;
   const fifth = harm.length > 2 ? harm[2] : root + 7;
-  const seventh = harm.length > 3 ? harm[3] : null;
+  // Para acordes diatônicos em tríade (deg1–deg7), deriva a 7ª diatônica da escala
+  // on-the-fly quando o padrão de baixo precisa dela (evita cair silenciosamente
+  // para a 5ª nos modos root_seventh, arp_low, arp_desc_low, shell_73).
+  let seventh = harm.length > 3 ? harm[3] : null;
+  if (seventh == null && /^deg[1-7]$/.test(harmonyId)) {
+    const g = Number(harmonyId.slice(3));
+    seventh = midiForScaleDegree(tonicPc, ivals, g + 6, baseOct);
+  }
 
   const br = root + off;
   const bt = third + off;
@@ -1239,15 +1333,22 @@ function refreshSampleExecutionLoop() {
       const bMidiRaw = nextHarmonyBassMidi(tcp, ivals, harmIdForBass, baseOct, bassMode, sampleBassPatIndex);
       sampleBassPatIndex += 1;
       if (bMidiRaw != null) {
-        const bMidi = Math.max(28, Math.min(108, bMidiRaw));
+        // Em vez de clamp (que dobra notas para a mesma altura nos extremos),
+        // transpõe por oitavas até cair no intervalo audível — preserva a relação harmônica.
+        let bMidi = bMidiRaw;
+        while (bMidi < 28) bMidi += 12;
+        while (bMidi > 108) bMidi -= 12;
         const bassVol = Number(document.getElementById("harmonyBassVol")?.value ?? 44) / 100;
         const bPeak = Math.max(0.04, Math.min(0.2, bassVol * 0.17));
         const hStyleRaw = document.getElementById("harmonyStyle")?.value || "sustain";
         const hStyle = hStyleRaw === "arpeggio_full" ? "sustain" : hStyleRaw;
+        // Duração: para walking bass/ostinato fica mais limpo se a nota não invade
+        // o próximo tempo. Antes `beat * 0.98` gerava sobreposição constante com o
+        // release das samples; agora ~70% do beat deixa respiro entre notas.
         const bDur =
           hStyle === "pluck"
-            ? Math.max(0.14, Math.min(0.42, beat * 0.45))
-            : Math.max(0.32, Math.min(1.05, beat * 0.98));
+            ? Math.max(0.14, Math.min(0.38, beat * 0.42))
+            : Math.max(0.22, Math.min(0.62, beat * 0.7));
         audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, bMidi, t + 0.006, bPeak, bDur, hStyle);
       }
     }
@@ -1908,6 +2009,7 @@ function wireGlobalControls() {
     renderDegreeStrip();
     refreshAllSlotsUI();
     updateSlotsMissingNotes();
+    updateScaleStarLabels();
     scheduleSyncAudio();
     refreshSampleExecutionLoop();
   };
@@ -2166,6 +2268,7 @@ function wireGlobalControls() {
 populateSelects();
 renderScaleMeta();
 renderDegreeStrip();
+updateScaleStarLabels();
 buildSlots();
 applySlotInputModeChrome();
 wireGlobalControls();

@@ -164,6 +164,16 @@ body.mode-simple .is-advanced {
   flex: 1 1 220px;
 }
 
+.hint-stars {
+  margin-left: 0.4rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: help;
+}
+
 /* Controles principais (Tônica, Escala) — tipografia maior e mais respiro */
 .field-hero {
   min-width: 180px;
