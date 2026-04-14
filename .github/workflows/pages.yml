@@ -23,13 +23,38 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      # Re-run no mesmo workflow run deixa 2 artefactos "github-pages"; deploy-pages falha.
-      - name: Apagar artefactos Pages anteriores deste run
-        uses: GeekyEggo/delete-artifact@v5
+      # Re-runs no mesmo run acumulam vários artefactos "github-pages"; deploy-pages exige um só.
+      # Apagar via API remove todos (o delete-artifact de terceiros não cobriu todos os casos).
+      - name: Apagar todos os artefactos "github-pages" deste run
+        uses: actions/github-script@v7
         with:
-          name: github-pages
-          useGlob: "false"
-          failOnError: false
+          script: |
+            const { owner, repo } = context.repo;
+            const run_id = context.runId;
+            const collected = [];
+            let page = 1;
+            while (true) {
+              const { data } = await github.rest.actions.listWorkflowRunArtifacts({
+                owner,
+                repo,
+                run_id,
+                name: 'github-pages',
+                per_page: 100,
+                page,
+              });
+              collected.push(...data.artifacts);
+              if (data.artifacts.length < 100) break;
+              page += 1;
+            }
+            for (const art of collected) {
+              core.info(`Deleting artifact id=${art.id} name=${art.name}`);
+              await github.rest.actions.deleteArtifact({
+                owner,
+                repo,
+                artifact_id: art.id,
+              });
+            }
+            core.info(`Deleted ${collected.length} prior github-pages artifact(s).`);
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,10 +65,11 @@ jobs:
           rsync -a --exclude='.git' --exclude='.github' --exclude='node_modules' ./ site/
 
       - name: Upload artifact
+        id: pages_upload
         uses: actions/upload-pages-artifact@v4
         with:
           path: site
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
