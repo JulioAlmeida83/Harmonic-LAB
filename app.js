@@ -942,6 +942,12 @@ function refreshSampleExecutionLoop() {
   if (!audioUserEnabled || !audio.ctx || audio.ctx.state !== "running") return;
   const soundMode = document.getElementById("soundMode")?.value ?? "synth";
   if (soundMode !== "sample" || !audio.instrumentSampler || !audio.scaleSampleBus) return;
+  // Nota: o reset do playhead da sequência acontece só no toggleAudio de
+  // arranque (start "fresco"). refreshSampleExecutionLoop é disparada também
+  // em onContextChange (mudança de escala, tônica, etc.); nesses casos
+  // resetar o contador faria a progressão saltar para o compasso 0 sempre
+  // que o applyScale dispara onChange do scaleType — bug visível como
+  // "a sequência nunca avança".
 
   const step = () => {
     if (!audioUserEnabled || !audio.ctx || audio.ctx.state !== "running") return;
@@ -985,10 +991,18 @@ function refreshSampleExecutionLoop() {
     }
 
     // Harmonia base (acorde em amostras; pode silenciar só o acorde)
-    const harmIdRaw = document.getElementById("harmonyBase")?.value ?? "off";
+    // Se a sequência de acordes estiver ativa, a progressão sobrepõe-se à
+    // harmonyBase estática: o acorde vem do step atual; se falhar (sequência
+    // vazia ou inválida), cai no comportamento normal.
+    const progStep = getActiveProgressionStep();
+    const harmIdRaw = progStep
+      ? "deg1"
+      : document.getElementById("harmonyBase")?.value ?? "off";
     const muteHarmChords = harmonyChordSamplesMuted();
     if (!slotsIsolated && harmIdRaw !== "off" && !muteHarmChords && audio.harmStabBus) {
-      const harmMidis = harmonyMidis(tcp, harmonyRefIvals(), harmIdRaw, baseOct);
+      const harmMidis = progStep
+        ? chordMidisAbsolute(progStep.step.chord, baseOct)
+        : harmonyMidis(tcp, harmonyRefIvals(), harmIdRaw, baseOct);
       const harmVol = Number(document.getElementById("harmVol").value) / 100;
       const peak = Math.max(0.04, Math.min(0.16, harmVol * 0.14));
       const harmonyStyle = document.getElementById("harmonyStyle")?.value || "sustain";
@@ -1014,7 +1028,13 @@ function refreshSampleExecutionLoop() {
     const bassMode = document.getElementById("harmonyBassMode")?.value ?? "off";
     const harmIdForBass = effectiveHarmonyIdForBassSamples(harmIdRaw);
     if (!slotsIsolated && harmIdForBass !== "off" && bassMode !== "off" && audio.instrumentSampler) {
-      const bMidiRaw = nextHarmonyBassMidi(tcp, harmonyRefIvals(), harmIdForBass, baseOct, bassMode, sampleBassPatIndex);
+      // Em modo sequência, o baixo segue o acorde atual via ivals sintéticos
+      // ancorados no chord.rootPc — os padrões (ostinato 1-5-1-3 etc.) continuam
+      // a funcionar com os graus 1/3/5/7 do próprio acorde.
+      const bassTonicPc = progStep ? progStep.step.chord.rootPc : tcp;
+      const bassIvals = progStep ? progSyntheticIvalsForChord(progStep.step.chord) : harmonyRefIvals();
+      const bassHarmId = progStep ? "deg1" : harmIdForBass;
+      const bMidiRaw = nextHarmonyBassMidi(bassTonicPc, bassIvals, bassHarmId, baseOct, bassMode, sampleBassPatIndex);
       sampleBassPatIndex += 1;
       if (bMidiRaw != null) {
         // Em vez de clamp (que dobra notas para a mesma altura nos extremos),
@@ -1084,6 +1104,10 @@ function refreshSampleExecutionLoop() {
   const scheduleNext = () => {
     if (!audioUserEnabled || !audio.ctx || audio.ctx.state !== "running") return;
     step();
+    // Avança a sequência de acordes (uma batida por tick). Se a escala do step
+    // mudar e `applyScale` estiver ativo, progTickBeat dispara onContextChange
+    // via o evento change no select #scaleType.
+    progTickBeat();
     nextAt += 60 / currentBpm();
     const now = audio.ctx.currentTime;
     const waitMs = Math.max(20, (nextAt - now) * 1000);
@@ -1570,6 +1594,358 @@ function syncAudio() {
   }
 }
 
+// --- Sequência de acordes (modo avançado) ----------------------------------
+// Lê/escreve estado interno; expõe `progressionHook` que o loop de amostras
+// consulta uma vez por batida para saber se deve substituir a harmonia base
+// pela progressão. Nenhum comportamento muda se `progState.enabled === false`
+// (short-circuit no topo de `getActiveProgressionStep`).
+
+const progState = {
+  enabled: false,
+  autoScale: false,
+  applyScale: false,
+  steps: [],          // raw steps [{roman?, chord?, bars, scale?}]
+  resolved: [],       // resolvidos via resolveSequenceStep
+  beatCounter: 0,     // beats acumulados desde o start do loop
+  lastStepIndex: -1,  // para detectar transições
+};
+
+/** 4 beats = 1 compasso (apenas 4/4 por agora). */
+const PROG_BEATS_PER_BAR = 4;
+
+/** Chaves candidatas para auto-escala (limitadas para evitar escolhas exóticas). */
+const PROG_AUTO_SCALE_CANDIDATES = [
+  "major",
+  "natural_minor",
+  "dorian",
+  "mixolydian",
+  "lydian",
+  "phrygian",
+  "harmonic_minor",
+  "melodic_minor_asc",
+];
+
+function progReadSteps() {
+  // Coleta os steps a partir da UI (inputs dentro de #progStepsEditor).
+  const editor = document.getElementById("progStepsEditor");
+  if (!editor) return [];
+  const rows = editor.querySelectorAll(".prog-step");
+  const out = [];
+  rows.forEach((row) => {
+    const mode = row.querySelector('select[data-field="mode"]')?.value || "roman";
+    const val = row.querySelector('input[data-field="value"]')?.value.trim() || "";
+    const bars = Math.max(1, Math.floor(Number(row.querySelector('input[data-field="bars"]')?.value) || 1));
+    const scaleKey = row.querySelector('select[data-field="scale"]')?.value || "";
+    if (!val) return;
+    const step = { bars };
+    if (mode === "chord") step.chord = val;
+    else step.roman = val;
+    if (scaleKey) step.scale = scaleKey;
+    out.push(step);
+  });
+  return out;
+}
+
+function progResolveFromUI() {
+  const steps = progReadSteps();
+  progState.steps = steps;
+  try {
+    const tonicPc = currentTonicPc();
+    const scaleKey = document.getElementById("scaleType")?.value || "major";
+    progState.resolved = resolveSequence(steps, {
+      tonicPc,
+      scaleKey,
+      autoScale: progState.autoScale,
+      scaleCandidates: PROG_AUTO_SCALE_CANDIDATES,
+    });
+  } catch (err) {
+    console.warn("[progression] erro a resolver sequência:", err.message);
+    progState.resolved = [];
+  }
+}
+
+function progRenderRow(rawStep, index) {
+  const row = document.createElement("div");
+  row.className = "prog-step";
+  row.setAttribute("role", "listitem");
+  row.dataset.index = String(index);
+
+  const label = document.createElement("div");
+  label.className = "prog-step-label";
+  label.textContent = `#${index + 1}`;
+  row.appendChild(label);
+
+  const modeSel = document.createElement("select");
+  modeSel.dataset.field = "mode";
+  modeSel.title = "Romano: transpõe com a tônica. Absoluto: fixo (ex.: Cmaj7).";
+  [
+    ["roman", "Romano"],
+    ["chord", "Acorde"],
+  ].forEach(([v, t]) => {
+    const o = document.createElement("option");
+    o.value = v;
+    o.textContent = t;
+    modeSel.appendChild(o);
+  });
+  modeSel.value = rawStep.chord ? "chord" : "roman";
+  row.appendChild(modeSel);
+
+  const barsInput = document.createElement("input");
+  barsInput.type = "number";
+  barsInput.min = "1";
+  barsInput.max = "16";
+  barsInput.step = "1";
+  barsInput.dataset.field = "bars";
+  barsInput.value = String(Math.max(1, Math.floor(rawStep.bars || 1)));
+  barsInput.title = "Compassos (4/4)";
+  row.appendChild(barsInput);
+
+  const valInput = document.createElement("input");
+  valInput.type = "text";
+  valInput.dataset.field = "value";
+  valInput.value = rawStep.chord || rawStep.roman || "";
+  valInput.placeholder = rawStep.chord ? "Cmaj7" : "ii7";
+  valInput.spellcheck = false;
+  row.appendChild(valInput);
+
+  const removeBtn = document.createElement("button");
+  removeBtn.type = "button";
+  removeBtn.className = "prog-step-remove";
+  removeBtn.textContent = "×";
+  removeBtn.title = "Remover este acorde";
+  removeBtn.addEventListener("click", () => {
+    row.remove();
+    progRelabelRows();
+    progResolveFromUI();
+    progRenderStatus();
+  });
+  row.appendChild(removeBtn);
+
+  // Atalho escondido para scale per-step: select invisível no DOM para preservar estado;
+  // renderizamos editor visível só quando o user pedir. Para o MVP, scale per-step
+  // vive só em progState (via auto-scale ou preset).
+  const scaleSel = document.createElement("select");
+  scaleSel.dataset.field = "scale";
+  scaleSel.style.display = "none";
+  const optNone = document.createElement("option");
+  optNone.value = "";
+  optNone.textContent = "(default)";
+  scaleSel.appendChild(optNone);
+  for (const [key, def] of Object.entries(SCALE_TYPES)) {
+    const o = document.createElement("option");
+    o.value = key;
+    o.textContent = def.label;
+    scaleSel.appendChild(o);
+  }
+  scaleSel.value = rawStep.scale || "";
+  row.appendChild(scaleSel);
+
+  const onChange = () => {
+    const useChord = modeSel.value === "chord";
+    valInput.placeholder = useChord ? "Cmaj7" : "ii7";
+    progResolveFromUI();
+    progRenderStatus();
+  };
+  modeSel.addEventListener("change", onChange);
+  valInput.addEventListener("change", onChange);
+  barsInput.addEventListener("change", onChange);
+  scaleSel.addEventListener("change", onChange);
+
+  return row;
+}
+
+function progRelabelRows() {
+  const editor = document.getElementById("progStepsEditor");
+  if (!editor) return;
+  const rows = editor.querySelectorAll(".prog-step");
+  rows.forEach((row, i) => {
+    const label = row.querySelector(".prog-step-label");
+    if (label) label.textContent = `#${i + 1}`;
+    row.dataset.index = String(i);
+  });
+}
+
+function progRenderEditor(rawSteps) {
+  const editor = document.getElementById("progStepsEditor");
+  if (!editor) return;
+  editor.innerHTML = "";
+  rawSteps.forEach((s, i) => editor.appendChild(progRenderRow(s, i)));
+}
+
+function progRenderStatus() {
+  const now = document.getElementById("progNowPlaying");
+  if (!now) return;
+  if (!progState.enabled || !progState.resolved.length) {
+    now.textContent = "";
+    return;
+  }
+  const totalBars = progState.resolved.reduce((s, st) => s + st.bars, 0);
+  const barIdx = Math.floor(progState.beatCounter / PROG_BEATS_PER_BAR);
+  const at = stepAtBar(progState.resolved, barIdx);
+  if (!at) {
+    now.textContent = "";
+    return;
+  }
+  const chordLabel = at.step.label + (at.step.roman && at.step.absolute ? "" : "");
+  const scaleLabel = SCALE_TYPES[at.step.scale]?.label || at.step.scale;
+  now.textContent = `Compasso ${at.barInStep + 1}/${at.step.bars} do step #${at.index + 1} · ${chordLabel} · ${scaleLabel} (ciclo de ${totalBars} comp.)`;
+
+  // Destaque visual no step ativo.
+  const editor = document.getElementById("progStepsEditor");
+  if (editor) {
+    const rows = editor.querySelectorAll(".prog-step");
+    rows.forEach((row, i) => {
+      row.classList.toggle("is-active", i === at.index);
+    });
+  }
+}
+
+function progPopulatePresets() {
+  const sel = document.getElementById("progPreset");
+  if (!sel) return;
+  // Mantém a primeira opção "— escolher —".
+  sel.querySelectorAll("option:not(:first-child)").forEach((o) => o.remove());
+  for (const [key, def] of Object.entries(CHORD_PROGRESSIONS)) {
+    const o = document.createElement("option");
+    o.value = key;
+    o.textContent = def.label;
+    sel.appendChild(o);
+  }
+}
+
+function progLoadPreset(key) {
+  const preset = CHORD_PROGRESSIONS[key];
+  if (!preset) return;
+  const scaleSel = document.getElementById("scaleType");
+  if (scaleSel && preset.defaultScale && !progState.applyScale) {
+    // Se o user não tem "aplicar escala" ligado, alinha o scaleType global
+    // pelo preset carregado (assim o rating/estrelas faz sentido).
+    scaleSel.value = preset.defaultScale;
+    scaleSel.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  progRenderEditor(preset.steps);
+  progResolveFromUI();
+  progRenderStatus();
+}
+
+/**
+ * Chamado pelo loop de amostras em cada batida. Incrementa o contador e,
+ * quando a escala do step mudou e `applyScale` está ativo, aplica no select
+ * global de escala (dispara o onChange normal do app).
+ */
+function progTickBeat() {
+  if (!progState.enabled || !progState.resolved.length) return;
+  progState.beatCounter += 1;
+  const barIdx = Math.floor(progState.beatCounter / PROG_BEATS_PER_BAR);
+  const at = stepAtBar(progState.resolved, barIdx);
+  if (!at) return;
+  if (at.index !== progState.lastStepIndex) {
+    progState.lastStepIndex = at.index;
+    if (progState.applyScale) {
+      const scaleSel = document.getElementById("scaleType");
+      if (scaleSel && at.step.scale && scaleSel.value !== at.step.scale && SCALE_TYPES[at.step.scale]) {
+        scaleSel.value = at.step.scale;
+        scaleSel.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }
+    // Atualiza status (fora do rAF — aceitável; roda 1x por step, não por beat).
+    progRenderStatus();
+  }
+}
+
+/** Reset do contador ao ligar/desligar áudio — evita avanços "fantasma". */
+function progResetPlayhead() {
+  progState.beatCounter = 0;
+  progState.lastStepIndex = -1;
+}
+
+/**
+ * Se a sequência estiver ativa e houver step atual, devolve `{chord}`; caso
+ * contrário `null`. Usado pelo loop para sobrepor a harmonia base.
+ */
+function getActiveProgressionStep() {
+  if (!progState.enabled || !progState.resolved.length) return null;
+  const barIdx = Math.floor(progState.beatCounter / PROG_BEATS_PER_BAR);
+  return stepAtBar(progState.resolved, barIdx);
+}
+
+/**
+ * Constroi ivals sintéticos centrados no acorde para reutilizar
+ * `nextHarmonyBassMidi` com harmonyId="deg1". Posições diatônicas 1/3/5/7
+ * mapeiam para root/third/fifth/seventh do acorde (faltantes caem em defaults).
+ */
+function progSyntheticIvalsForChord(chord) {
+  const ivl = chord.intervals;
+  const third = ivl[1] ?? 4;
+  const fifth = ivl[2] ?? 7;
+  // 7ª default derivada da qualidade da tríade quando o acorde é uma tríade
+  // pura (sem 7). Evita que padrões "1-3-5-7" e "shell_73" soem estranhos
+  // sobre C ou Dm.
+  let seventh = ivl[3];
+  if (seventh == null) {
+    if (fifth === 6) seventh = 9; // tríade diminuta → dim7
+    else if (third === 3) seventh = 10; // tríade menor → m7
+    else seventh = 11; // tríade maior → M7
+  }
+  return [0, third, third, fifth, fifth, seventh, seventh];
+}
+
+function wireProgressionControls() {
+  const enabled = document.getElementById("progEnabled");
+  const preset = document.getElementById("progPreset");
+  const auto = document.getElementById("progAutoScale");
+  const applyScale = document.getElementById("progApplyScale");
+  const addBtn = document.getElementById("progAddStep");
+  const clearBtn = document.getElementById("progClear");
+  if (!enabled || !preset || !addBtn || !clearBtn) return;
+
+  progPopulatePresets();
+
+  enabled.addEventListener("change", () => {
+    progState.enabled = enabled.checked;
+    progResetPlayhead();
+    progResolveFromUI();
+    progRenderStatus();
+    refreshSampleExecutionLoop();
+  });
+
+  auto.addEventListener("change", () => {
+    progState.autoScale = auto.checked;
+    progResolveFromUI();
+    progRenderStatus();
+  });
+
+  applyScale.addEventListener("change", () => {
+    progState.applyScale = applyScale.checked;
+  });
+
+  preset.addEventListener("change", () => {
+    const key = preset.value;
+    if (key) {
+      progLoadPreset(key);
+      preset.value = "";
+    }
+  });
+
+  addBtn.addEventListener("click", () => {
+    const editor = document.getElementById("progStepsEditor");
+    if (!editor) return;
+    const rows = editor.querySelectorAll(".prog-step");
+    const newRaw = { roman: "I", bars: 1 };
+    editor.appendChild(progRenderRow(newRaw, rows.length));
+    progResolveFromUI();
+    progRenderStatus();
+  });
+
+  clearBtn.addEventListener("click", () => {
+    const editor = document.getElementById("progStepsEditor");
+    if (editor) editor.innerHTML = "";
+    progState.steps = [];
+    progState.resolved = [];
+    progRenderStatus();
+  });
+}
+
 function wireGlobalControls() {
   const btnAudio = document.getElementById("btnAudio");
 
@@ -1617,6 +1993,10 @@ function wireGlobalControls() {
       }
       applyMasterGainFromUI();
       syncAudio();
+      // Zera o contador da sequência só aqui, no start "fresco" do áudio.
+      // `refreshSampleExecutionLoop` pode ser chamada durante a execução
+      // (e.g. ao mudar de escala mid-progressão) e não deve ressetar o playhead.
+      progResetPlayhead();
       refreshSampleExecutionLoop();
       try {
         await preloadSamplerBank();
@@ -1693,6 +2073,9 @@ function wireGlobalControls() {
     refreshAllSlotsUI();
     updateSlotsMissingNotes();
     updateScaleStarLabels();
+    // Tônica ou escala mudou → re-resolver romanos da sequência.
+    progResolveFromUI();
+    progRenderStatus();
     scheduleSyncAudio();
     refreshSampleExecutionLoop();
   };
@@ -1955,6 +2338,7 @@ updateScaleStarLabels();
 buildSlots();
 applySlotInputModeChrome();
 wireGlobalControls();
+wireProgressionControls();
 updateSampleControlsEnabled();
 updateSlotsMissingNotes();
 

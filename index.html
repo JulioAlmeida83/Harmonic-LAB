@@ -227,6 +227,38 @@
     </fieldset>
   </section>
 
+  <section class="panel panel-progression is-advanced" aria-label="Sequência de acordes (avançado)">
+    <div class="prog-head">
+      <h2>Sequência de acordes <small class="prog-hint">Substitui a harmonia estática por uma progressão que avança por compassos.</small></h2>
+      <div class="prog-tools">
+        <label class="field field-check">
+          <input type="checkbox" id="progEnabled" />
+          <span>Ativar sequência</span>
+        </label>
+        <label class="field slim">
+          <span>Preset</span>
+          <select id="progPreset" title="Carrega uma progressão pré-definida no editor">
+            <option value="" selected>— escolher —</option>
+          </select>
+        </label>
+        <label class="field field-check" title="Para cada acorde, escolhe automaticamente a escala com maior rating">
+          <input type="checkbox" id="progAutoScale" />
+          <span>Auto-escala por acorde</span>
+        </label>
+        <label class="field field-check" title="Aplica a escala do step ao seletor global (afeta slots e loop da escala)">
+          <input type="checkbox" id="progApplyScale" />
+          <span>Aplicar escala ao loop</span>
+        </label>
+      </div>
+    </div>
+    <div id="progStepsEditor" class="prog-steps" role="list"></div>
+    <div class="prog-actions">
+      <button type="button" id="progAddStep" class="btn">+ Acorde</button>
+      <button type="button" id="progClear" class="btn">Limpar</button>
+      <span id="progNowPlaying" class="prog-now" aria-live="polite"></span>
+    </div>
+  </section>
+
   <section class="panel" aria-label="Referência de graus">
     <h2>Graus diatônicos (vs tônica, 1–22)</h2>
     <div id="scaleMeta" class="scale-meta" aria-live="polite"></div>

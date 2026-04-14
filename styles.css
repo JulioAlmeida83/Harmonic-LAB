@@ -738,3 +738,112 @@ input[type="checkbox"]:focus-visible {
     animation: none;
   }
 }
+
+/* --- Sequência de acordes (modo avançado) ---------------------------------- */
+
+.panel-progression .prog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.panel-progression .prog-head h2 {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.panel-progression .prog-hint {
+  font-size: 0.78rem;
+  font-weight: 400;
+  opacity: 0.75;
+}
+
+.panel-progression .prog-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.prog-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.04);
+  min-height: 3.25rem;
+}
+
+.prog-step {
+  display: grid;
+  grid-template-columns: minmax(0, 8rem) 4rem minmax(0, 7rem) 1.75rem;
+  gap: 0.35rem;
+  align-items: center;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.prog-step.is-active {
+  border-color: #2a66d6;
+  box-shadow: 0 0 0 2px rgba(42, 102, 214, 0.25);
+  background: #eef4ff;
+}
+
+.prog-step input,
+.prog-step select {
+  width: 100%;
+  min-width: 0;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.88rem;
+  box-sizing: border-box;
+}
+
+.prog-step .prog-step-label {
+  font-size: 0.7rem;
+  opacity: 0.7;
+  grid-column: 1 / -1;
+  margin-bottom: -0.15rem;
+}
+
+.prog-step .prog-step-remove {
+  appearance: none;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  background: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0.15rem 0.3rem;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.prog-step .prog-step-remove:hover {
+  background: #fdeaea;
+  border-color: #d66;
+}
+
+.prog-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.prog-now {
+  font-size: 0.85rem;
+  opacity: 0.85;
+  margin-left: auto;
+}
+
+body.mode-simple .panel-progression {
+  display: none;
+}

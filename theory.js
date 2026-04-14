@@ -348,6 +348,348 @@ function scaleStarsRender(n) {
   return "★".repeat(r) + "☆".repeat(3 - r);
 }
 
+// --- Qualidades de acorde e parsers ----------------------------------------
+
+/**
+ * Dicionário de qualidades de acorde → intervalos em semitons a partir da
+ * fundamental. As chaves cobrem grafias comuns (ASCII e unicode). A ordem das
+ * entradas é irrelevante; o parser testa chaves candidatas.
+ */
+const CHORD_QUALITIES = {
+  "": { intervals: [0, 4, 7], label: "" },
+  maj: { intervals: [0, 4, 7], label: "" },
+  M: { intervals: [0, 4, 7], label: "" },
+  m: { intervals: [0, 3, 7], label: "m" },
+  min: { intervals: [0, 3, 7], label: "m" },
+  "-": { intervals: [0, 3, 7], label: "m" },
+  dim: { intervals: [0, 3, 6], label: "dim" },
+  "°": { intervals: [0, 3, 6], label: "°" },
+  aug: { intervals: [0, 4, 8], label: "aug" },
+  "+": { intervals: [0, 4, 8], label: "+" },
+  sus2: { intervals: [0, 2, 7], label: "sus2" },
+  sus4: { intervals: [0, 5, 7], label: "sus4" },
+  sus: { intervals: [0, 5, 7], label: "sus4" },
+  5: { intervals: [0, 7], label: "5" },
+  6: { intervals: [0, 4, 7, 9], label: "6" },
+  m6: { intervals: [0, 3, 7, 9], label: "m6" },
+  7: { intervals: [0, 4, 7, 10], label: "7" },
+  maj7: { intervals: [0, 4, 7, 11], label: "maj7" },
+  M7: { intervals: [0, 4, 7, 11], label: "maj7" },
+  Δ: { intervals: [0, 4, 7, 11], label: "maj7" },
+  Δ7: { intervals: [0, 4, 7, 11], label: "maj7" },
+  m7: { intervals: [0, 3, 7, 10], label: "m7" },
+  "-7": { intervals: [0, 3, 7, 10], label: "m7" },
+  mMaj7: { intervals: [0, 3, 7, 11], label: "mMaj7" },
+  mM7: { intervals: [0, 3, 7, 11], label: "mMaj7" },
+  m7b5: { intervals: [0, 3, 6, 10], label: "m7♭5" },
+  "m7♭5": { intervals: [0, 3, 6, 10], label: "m7♭5" },
+  ø: { intervals: [0, 3, 6, 10], label: "ø" },
+  ø7: { intervals: [0, 3, 6, 10], label: "ø" },
+  dim7: { intervals: [0, 3, 6, 9], label: "°7" },
+  "°7": { intervals: [0, 3, 6, 9], label: "°7" },
+  "7sus4": { intervals: [0, 5, 7, 10], label: "7sus4" },
+  9: { intervals: [0, 4, 7, 10, 14], label: "9" },
+  maj9: { intervals: [0, 4, 7, 11, 14], label: "maj9" },
+  m9: { intervals: [0, 3, 7, 10, 14], label: "m9" },
+};
+
+/** Normaliza acidentes unicode (♯ ♭) → ASCII (# b). */
+function normalizeAccidental(token) {
+  if (!token) return "";
+  return token.replace(/♯/g, "#").replace(/♭/g, "b");
+}
+
+/** Canonicaliza a string de qualidade para uma chave de `CHORD_QUALITIES`. */
+function canonicalizeQualityToken(raw) {
+  const t = (raw || "").trim();
+  if (t in CHORD_QUALITIES) return t;
+  const lc = t.toLowerCase();
+  if (lc === "maj") return "maj";
+  if (lc === "min" || lc === "-") return "m";
+  if (lc === "dim") return "dim";
+  if (lc === "aug") return "aug";
+  if (lc === "sus2") return "sus2";
+  if (lc === "sus4" || lc === "sus") return "sus4";
+  return null;
+}
+
+/**
+ * Parse de acorde absoluto: "Cmaj7" → { rootPc, intervals, quality, label }.
+ * Suporta grafias: `C`, `Cm`, `C7`, `Cmaj7`, `Cm7`, `C#m7b5`, `Bbdim7`, `D♭Δ7`.
+ */
+function parseAbsoluteChord(str) {
+  if (typeof str !== "string") throw new Error("parseAbsoluteChord: string esperada");
+  const s = str.trim();
+  const m = s.match(/^([A-G])([#b♭♯]?)(.*)$/);
+  if (!m) throw new Error(`Acorde inválido: ${str}`);
+  const [, letter, accRaw, tailRaw] = m;
+  const acc = normalizeAccidental(accRaw);
+  const rootKey = letter + acc;
+  const rootPc = NOTE_MAP[rootKey];
+  if (rootPc == null) throw new Error(`Nota inválida: ${rootKey}`);
+  const qualRaw = tailRaw.trim();
+  const qualKey = canonicalizeQualityToken(qualRaw);
+  if (qualKey == null) throw new Error(`Qualidade desconhecida: "${qualRaw}" em "${str}"`);
+  const q = CHORD_QUALITIES[qualKey];
+  return {
+    rootPc,
+    intervals: q.intervals.slice(),
+    quality: q.label,
+    label: rootKey + q.label,
+  };
+}
+
+const ROMAN_NUMERALS_MAP = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7 };
+
+/**
+ * Parse de grau romano para um acorde concreto.
+ *   parseRomanChord("ii7", 0, "major") → { degree:2, rootPc:2, intervals:[0,3,7,10], ... }
+ *
+ * Regras de interpretação:
+ *   - Maiúsculas (I, IV, V) → qualidade default **maior**.
+ *   - Minúsculas (ii, iii, vi) → qualidade default **menor**.
+ *   - Símbolo `°` → dim (ou dim7 se seguido de 7); `ø` → m7♭5.
+ *   - Sufixo explícito (7, maj7, m7, sus4, etc.) vence o default.
+ *   - Prefixo `b` ou `#` altera a raiz em ±1 semitom (ex.: `bVII`).
+ */
+function parseRomanChord(str, tonicPc = 0, scaleKey = "major") {
+  if (typeof str !== "string") throw new Error("parseRomanChord: string esperada");
+  const s = str.trim();
+  const m = s.match(/^([b#♭♯]?)([ivIV]+)(°|ø)?(.*)$/);
+  if (!m) throw new Error(`Romano inválido: ${str}`);
+  const [, accRaw, romanRaw, diminutive, tailRaw] = m;
+  const upper = romanRaw.toUpperCase();
+  const degree = ROMAN_NUMERALS_MAP[upper];
+  if (!degree) throw new Error(`Romano inválido: ${str}`);
+  const isMinorRoman = romanRaw[0] === romanRaw[0].toLowerCase();
+  const acc = normalizeAccidental(accRaw);
+  const scale = SCALE_TYPES[scaleKey] || SCALE_TYPES.major;
+  let rootOffset = scale.intervals[degree - 1];
+  if (rootOffset == null) throw new Error(`Grau ${degree} fora da escala ${scaleKey}`);
+  if (acc === "b") rootOffset = (rootOffset - 1 + 12) % 12;
+  else if (acc === "#") rootOffset = (rootOffset + 1) % 12;
+  const rootPc = (tonicPc + rootOffset + 12) % 12;
+
+  const tail = (tailRaw || "").trim();
+  let qualKey = null;
+  if (diminutive === "°") {
+    qualKey = tail === "7" ? "dim7" : "dim";
+  } else if (diminutive === "ø") {
+    qualKey = "m7b5";
+  } else if (tail === "") {
+    qualKey = isMinorRoman ? "m" : "";
+  } else {
+    // Sufixo explícito — combina com o case do romano se relevante.
+    if (isMinorRoman && tail === "7") qualKey = "m7";
+    else if (isMinorRoman && tail === "maj7") qualKey = "mMaj7";
+    else qualKey = canonicalizeQualityToken(tail);
+  }
+  if (qualKey == null || !(qualKey in CHORD_QUALITIES)) {
+    throw new Error(`Qualidade desconhecida: "${tailRaw}" em "${str}"`);
+  }
+  const q = CHORD_QUALITIES[qualKey];
+  return {
+    degree,
+    rootPc,
+    intervals: q.intervals.slice(),
+    quality: q.label,
+    roman: s,
+  };
+}
+
+/** Pitch classes absolutos de um descritor de acorde. */
+function chordPitchClasses(chord) {
+  return chord.intervals.map((i) => ((chord.rootPc + i) % 12 + 12) % 12);
+}
+
+/** Notas MIDI absolutas do acorde em `baseOct` (C4 = oitava 4). */
+function chordMidisAbsolute(chord, baseOct = 4) {
+  return chord.intervals.map((ivl) => 12 * (baseOct + 1) + chord.rootPc + ivl);
+}
+
+// --- Auto-escala (melhor tipo de escala para um acorde) ---------------------
+
+/**
+ * Escolhe o tipo de escala (entre `candidates` — default: todas em
+ * SCALE_TYPES) que melhor casa com o acorde, mantendo a tônica fixa em
+ * `tonicPc`. O ranking reutiliza `rateScaleAgainstChord`, passando pitch
+ * classes do acorde relativos à tônica da escala.
+ *
+ * Em empate, devolve a primeira chave na ordem em que aparece em `candidates`.
+ */
+function pickParentScaleForChord(chord, tonicPc = 0, candidates) {
+  const relPcs = chord.intervals.map((i) => (chord.rootPc - tonicPc + i + 12) % 12);
+  const keys = Array.isArray(candidates) && candidates.length ? candidates : Object.keys(SCALE_TYPES);
+  let best = { key: keys[0], rating: -1 };
+  for (const k of keys) {
+    if (!(k in SCALE_TYPES)) continue;
+    const r = rateScaleAgainstChord(k, relPcs);
+    if (r > best.rating) best = { key: k, rating: r };
+  }
+  return best;
+}
+
+// --- Progressões pré-definidas ---------------------------------------------
+
+const CHORD_PROGRESSIONS = {
+  ii_V_I_major: {
+    label: "ii–V–I maior",
+    defaultScale: "major",
+    steps: [
+      { roman: "ii7", bars: 1 },
+      { roman: "V7", bars: 1 },
+      { roman: "Imaj7", bars: 2 },
+    ],
+  },
+  ii_V_i_minor: {
+    label: "ii°–V7–i menor",
+    defaultScale: "harmonic_minor",
+    steps: [
+      { roman: "iiø", bars: 1 },
+      { roman: "V7", bars: 1 },
+      { roman: "i", bars: 2 },
+    ],
+  },
+  I_vi_ii_V_turnaround: {
+    label: "I–vi–ii–V (turnaround jazz)",
+    defaultScale: "major",
+    steps: [
+      { roman: "Imaj7", bars: 1 },
+      { roman: "vi7", bars: 1 },
+      { roman: "ii7", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+  I_V_vi_IV_pop: {
+    label: "I–V–vi–IV (pop)",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "V", bars: 1 },
+      { roman: "vi", bars: 1 },
+      { roman: "IV", bars: 1 },
+    ],
+  },
+  I_vi_IV_V_50s: {
+    label: "I–vi–IV–V (anos 50)",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "vi", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+  blues_12_major: {
+    label: "Blues 12 compassos (maior)",
+    defaultScale: "mixolydian",
+    steps: [
+      { roman: "I7", bars: 4 },
+      { roman: "IV7", bars: 2 },
+      { roman: "I7", bars: 2 },
+      { roman: "V7", bars: 1 },
+      { roman: "IV7", bars: 1 },
+      { roman: "I7", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+  andalusian: {
+    label: "Cadência andaluza (i–VII–VI–V)",
+    defaultScale: "phrygian",
+    steps: [
+      { roman: "i", bars: 1 },
+      { roman: "VII", bars: 1 },
+      { roman: "VI", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+  canon: {
+    label: "Canon (I–V–vi–iii–IV–I–IV–V)",
+    defaultScale: "major",
+    steps: [
+      { roman: "I", bars: 1 },
+      { roman: "V", bars: 1 },
+      { roman: "vi", bars: 1 },
+      { roman: "iii", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "I", bars: 1 },
+      { roman: "IV", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+};
+
+// --- Sequência: resolução e avanço por compasso -----------------------------
+
+/**
+ * Resolve um step cru em um step executável.
+ *
+ * Formato de entrada:
+ *   { roman: "ii7", bars: 1 }                // grau — transpõe com a tônica
+ *   { chord: "Dm7",  bars: 1 }               // acorde absoluto — fixo
+ *   { roman: "V7", scale: "mixolydian" }     // escala explícita para o step
+ *
+ * `ctx`:
+ *   - tonicPc   (0..11)           — tônica global; usada para resolver romanos.
+ *   - scaleKey  (chave de SCALE_TYPES) — escala "contexto" default do step.
+ *   - autoScale (bool)            — se true e o step não traz `scale`, escolhe
+ *                                    automaticamente o melhor tipo em
+ *                                    `scaleCandidates`.
+ *   - scaleCandidates (string[])  — limite de pesquisa do auto-scale.
+ */
+function resolveSequenceStep(rawStep, ctx = {}) {
+  if (!rawStep) throw new Error("resolveSequenceStep: step ausente");
+  const { tonicPc = 0, scaleKey = "major", autoScale = false, scaleCandidates } = ctx;
+  let chord;
+  if (rawStep.chord) {
+    chord = parseAbsoluteChord(rawStep.chord);
+  } else if (rawStep.roman) {
+    chord = parseRomanChord(rawStep.roman, tonicPc, scaleKey);
+  } else {
+    throw new Error("step precisa de 'roman' ou 'chord'");
+  }
+  const bars = Math.max(1, Math.floor(rawStep.bars ?? 1));
+  let chosenScale = rawStep.scale || scaleKey;
+  if (autoScale && !rawStep.scale) {
+    chosenScale = pickParentScaleForChord(chord, tonicPc, scaleCandidates).key;
+  }
+  return {
+    chord,
+    bars,
+    scale: chosenScale,
+    roman: rawStep.roman || null,
+    absolute: rawStep.chord || null,
+    label: rawStep.roman || rawStep.chord || chord.label,
+  };
+}
+
+/** Resolve a sequência inteira. */
+function resolveSequence(rawSteps, ctx = {}) {
+  if (!Array.isArray(rawSteps)) throw new Error("resolveSequence: array esperado");
+  return rawSteps.map((s) => resolveSequenceStep(s, ctx));
+}
+
+/**
+ * Dado uma sequência resolvida e um índice de compasso (0-based, mas pode ser
+ * qualquer inteiro — envolve-se em loop), devolve o step ativo, o índice do
+ * step, o compasso relativo dentro do step e o total de compassos da volta.
+ */
+function stepAtBar(resolvedSteps, barIndex) {
+  if (!Array.isArray(resolvedSteps) || resolvedSteps.length === 0) return null;
+  const totalBars = resolvedSteps.reduce((s, st) => s + st.bars, 0);
+  if (totalBars <= 0) return null;
+  const bar = ((Math.floor(barIndex) % totalBars) + totalBars) % totalBars;
+  let acc = 0;
+  for (let i = 0; i < resolvedSteps.length; i++) {
+    const st = resolvedSteps[i];
+    if (bar < acc + st.bars) {
+      return { step: st, index: i, barInStep: bar - acc, totalBars };
+    }
+    acc += st.bars;
+  }
+  return null;
+}
+
 // --- Export dual-mode (browser globals + CommonJS) --------------------------
 
 (function (root, api) {
@@ -395,4 +737,17 @@ function scaleStarsRender(n) {
   // Compatibilidade escala × acorde
   rateScaleAgainstChord,
   scaleStarsRender,
+  // Acordes (qualidades, parsers)
+  CHORD_QUALITIES,
+  parseAbsoluteChord,
+  parseRomanChord,
+  chordPitchClasses,
+  chordMidisAbsolute,
+  // Auto-escala
+  pickParentScaleForChord,
+  // Sequências de acordes
+  CHORD_PROGRESSIONS,
+  resolveSequenceStep,
+  resolveSequence,
+  stepAtBar,
 });

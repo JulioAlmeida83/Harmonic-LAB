@@ -48,6 +48,19 @@ const {
   // Ratings
   rateScaleAgainstChord,
   scaleStarsRender,
+  // Acordes
+  CHORD_QUALITIES,
+  parseAbsoluteChord,
+  parseRomanChord,
+  chordPitchClasses,
+  chordMidisAbsolute,
+  // Auto-escala
+  pickParentScaleForChord,
+  // Sequências
+  CHORD_PROGRESSIONS,
+  resolveSequenceStep,
+  resolveSequence,
+  stepAtBar,
 } = theory;
 
 // ---------------------------------------------------------------------------
@@ -490,5 +503,304 @@ describe("scaleStarsRender — formatação", () => {
     assert.equal(scaleStarsRender(7), "★★★");
     assert.equal(scaleStarsRender(-5), "");
     assert.equal(scaleStarsRender(null), "");
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("parseAbsoluteChord — tétrades e tríades nomeadas", () => {
+  test("Cmaj7 → [0,4,7,11]", () => {
+    const c = parseAbsoluteChord("Cmaj7");
+    assert.equal(c.rootPc, 0);
+    assert.deepEqual(c.intervals, [0, 4, 7, 11]);
+    assert.deepEqual(chordPitchClasses(c), [0, 4, 7, 11]);
+  });
+
+  test("Dm7 → [2,5,9,0] como pcs absolutos", () => {
+    const c = parseAbsoluteChord("Dm7");
+    assert.equal(c.rootPc, 2);
+    assert.deepEqual(c.intervals, [0, 3, 7, 10]);
+    assert.deepEqual(chordPitchClasses(c), [2, 5, 9, 0]);
+  });
+
+  test("G7 → [7,11,2,5]", () => {
+    assert.deepEqual(chordPitchClasses(parseAbsoluteChord("G7")), [7, 11, 2, 5]);
+  });
+
+  test("Bbmaj7 e B♭Δ7 equivalem", () => {
+    const a = parseAbsoluteChord("Bbmaj7");
+    const b = parseAbsoluteChord("B♭Δ7");
+    assert.equal(a.rootPc, 10);
+    assert.equal(b.rootPc, 10);
+    assert.deepEqual(a.intervals, b.intervals);
+  });
+
+  test("F#m7b5 e F♯ø coincidem", () => {
+    const a = parseAbsoluteChord("F#m7b5");
+    const b = parseAbsoluteChord("F♯ø");
+    assert.equal(a.rootPc, 6);
+    assert.equal(b.rootPc, 6);
+    assert.deepEqual(a.intervals, [0, 3, 6, 10]);
+    assert.deepEqual(b.intervals, [0, 3, 6, 10]);
+  });
+
+  test("tríades simples sem sufixo", () => {
+    assert.deepEqual(parseAbsoluteChord("C").intervals, [0, 4, 7]);
+    assert.deepEqual(parseAbsoluteChord("Am").intervals, [0, 3, 7]);
+    assert.deepEqual(parseAbsoluteChord("Bdim").intervals, [0, 3, 6]);
+    assert.deepEqual(parseAbsoluteChord("Caug").intervals, [0, 4, 8]);
+  });
+
+  test("rejeita qualidades e notas inválidas", () => {
+    assert.throws(() => parseAbsoluteChord("H7"));
+    assert.throws(() => parseAbsoluteChord("Cmaj13b9#5"));
+    assert.throws(() => parseAbsoluteChord(""));
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("parseRomanChord — romanos em contexto diatônico", () => {
+  test("ii7 em C maior → Dm7", () => {
+    const c = parseRomanChord("ii7", 0, "major");
+    assert.equal(c.degree, 2);
+    assert.equal(c.rootPc, 2);
+    assert.deepEqual(c.intervals, [0, 3, 7, 10]);
+    assert.deepEqual(chordPitchClasses(c), [2, 5, 9, 0]);
+  });
+
+  test("V7 em C maior → G7", () => {
+    const c = parseRomanChord("V7", 0, "major");
+    assert.equal(c.rootPc, 7);
+    assert.deepEqual(chordPitchClasses(c), [7, 11, 2, 5]);
+  });
+
+  test("Imaj7 em C maior → Cmaj7", () => {
+    assert.deepEqual(chordPitchClasses(parseRomanChord("Imaj7", 0, "major")), [0, 4, 7, 11]);
+  });
+
+  test("vi em C maior → tríade menor em A (Am)", () => {
+    const c = parseRomanChord("vi", 0, "major");
+    assert.equal(c.rootPc, 9);
+    assert.deepEqual(c.intervals, [0, 3, 7]);
+  });
+
+  test("iiø em C maior → Dm7b5", () => {
+    const c = parseRomanChord("iiø", 0, "major");
+    assert.equal(c.rootPc, 2);
+    assert.deepEqual(c.intervals, [0, 3, 6, 10]);
+  });
+
+  test("transpõe com a tônica: ii7 em F (tonicPc=5) → Gm7", () => {
+    const c = parseRomanChord("ii7", 5, "major");
+    assert.equal(c.rootPc, 7);
+    assert.deepEqual(chordPitchClasses(c), [7, 10, 2, 5]);
+  });
+
+  test("prefixo bVII em C maior → Bb (tríade maior)", () => {
+    const c = parseRomanChord("bVII", 0, "major");
+    assert.equal(c.rootPc, 10);
+    assert.deepEqual(c.intervals, [0, 4, 7]);
+  });
+
+  test("vii° em C maior → Bdim", () => {
+    const c = parseRomanChord("vii°", 0, "major");
+    assert.equal(c.rootPc, 11);
+    assert.deepEqual(c.intervals, [0, 3, 6]);
+  });
+
+  test("rejeita romanos inválidos", () => {
+    assert.throws(() => parseRomanChord("VIII", 0, "major"));
+    assert.throws(() => parseRomanChord("xyz", 0, "major"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("chordMidisAbsolute — MIDI das notas do acorde", () => {
+  test("Cmaj7 em oitava 4 → [60,64,67,71]", () => {
+    const c = parseAbsoluteChord("Cmaj7");
+    assert.deepEqual(chordMidisAbsolute(c, 4), [60, 64, 67, 71]);
+  });
+
+  test("G7 em oitava 3 → [55,59,62,65]", () => {
+    const c = parseAbsoluteChord("G7");
+    assert.deepEqual(chordMidisAbsolute(c, 3), [55, 59, 62, 65]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("pickParentScaleForChord — melhor escala-pai", () => {
+  test("Cmaj7 em tônica C → major (ou lydian)", () => {
+    const c = parseAbsoluteChord("Cmaj7");
+    const best = pickParentScaleForChord(c, 0, ["major", "lydian", "mixolydian", "natural_minor"]);
+    // major e lydian cobrem Cmaj7 sem avoid; mixolydian falha (b7) e natural_minor falha (b3).
+    assert.ok(best.key === "major" || best.key === "lydian", `escolheu ${best.key}`);
+    assert.equal(best.rating, 3);
+  });
+
+  test("Dm7 em tônica C → major cobre sem avoid", () => {
+    const c = parseAbsoluteChord("Dm7");
+    const best = pickParentScaleForChord(c, 0, ["major", "dorian", "phrygian", "natural_minor"]);
+    assert.equal(best.rating, 3);
+    // Primeiro candidato com rating 3 deve ser "major".
+    assert.equal(best.key, "major");
+  });
+
+  test("G7 em tônica C → major cobre todas as notas mas tem avoid (C sobre B)", () => {
+    // G7 pcs absolutos relativos a C = [7, 11, 2, 5]. C major contém todos os 4,
+    // porém a tônica C (pc=0) é semitom acima da 3ª (B) e fora do acorde → -1 avoid,
+    // baixando o rating para 2. É a conhecida avoid note do ii–V–I clássico (C/B).
+    const c = parseAbsoluteChord("G7");
+    const best = pickParentScaleForChord(c, 0, ["major", "mixolydian", "harmonic_minor"]);
+    assert.equal(best.rating, 2);
+    // Empate: major vem primeiro no candidates.
+    assert.equal(best.key, "major");
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("CHORD_PROGRESSIONS — catálogo de presets", () => {
+  test("catálogo tem pelo menos 6 presets essenciais", () => {
+    const keys = Object.keys(CHORD_PROGRESSIONS);
+    assert.ok(keys.length >= 6, `só ${keys.length} presets`);
+    assert.ok("ii_V_I_major" in CHORD_PROGRESSIONS);
+    assert.ok("blues_12_major" in CHORD_PROGRESSIONS);
+  });
+
+  test("cada preset tem label, defaultScale e steps bem formados", () => {
+    for (const [key, preset] of Object.entries(CHORD_PROGRESSIONS)) {
+      assert.equal(typeof preset.label, "string", `${key} label`);
+      assert.ok(preset.defaultScale in SCALE_TYPES, `${key} defaultScale`);
+      assert.ok(Array.isArray(preset.steps) && preset.steps.length > 0, `${key} steps`);
+      for (const step of preset.steps) {
+        assert.ok(step.roman || step.chord, `${key} step precisa de roman|chord`);
+        assert.ok((step.bars ?? 1) >= 1, `${key} step bars`);
+      }
+    }
+  });
+
+  test("blues 12 compassos totaliza 12 compassos", () => {
+    const preset = CHORD_PROGRESSIONS.blues_12_major;
+    const total = preset.steps.reduce((s, st) => s + (st.bars ?? 1), 0);
+    assert.equal(total, 12);
+  });
+
+  test("ii–V–I resolve para Dm7 → G7 → Cmaj7 em C maior", () => {
+    const preset = CHORD_PROGRESSIONS.ii_V_I_major;
+    const resolved = resolveSequence(preset.steps, { tonicPc: 0, scaleKey: preset.defaultScale });
+    assert.equal(resolved.length, 3);
+    assert.deepEqual(chordPitchClasses(resolved[0].chord), [2, 5, 9, 0]); // Dm7
+    assert.deepEqual(chordPitchClasses(resolved[1].chord), [7, 11, 2, 5]); // G7
+    assert.deepEqual(chordPitchClasses(resolved[2].chord), [0, 4, 7, 11]); // Cmaj7
+  });
+
+  test("ii–V–I transposta para F (tonicPc=5) → Gm7 → C7 → Fmaj7", () => {
+    const preset = CHORD_PROGRESSIONS.ii_V_I_major;
+    const resolved = resolveSequence(preset.steps, { tonicPc: 5, scaleKey: preset.defaultScale });
+    assert.deepEqual(chordPitchClasses(resolved[0].chord), [7, 10, 2, 5]); // Gm7
+    assert.deepEqual(chordPitchClasses(resolved[1].chord), [0, 4, 7, 10]); // C7
+    assert.deepEqual(chordPitchClasses(resolved[2].chord), [5, 9, 0, 4]); // Fmaj7
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("resolveSequenceStep — romano vs absoluto e auto-escala", () => {
+  test("chord absoluto não transpõe quando tônica muda", () => {
+    const a = resolveSequenceStep({ chord: "Cmaj7", bars: 2 }, { tonicPc: 0 });
+    const b = resolveSequenceStep({ chord: "Cmaj7", bars: 2 }, { tonicPc: 5 });
+    assert.deepEqual(chordPitchClasses(a.chord), [0, 4, 7, 11]);
+    assert.deepEqual(chordPitchClasses(b.chord), [0, 4, 7, 11]);
+    assert.equal(a.bars, 2);
+  });
+
+  test("roman transpõe quando tônica muda", () => {
+    const a = resolveSequenceStep({ roman: "Imaj7" }, { tonicPc: 0, scaleKey: "major" });
+    const b = resolveSequenceStep({ roman: "Imaj7" }, { tonicPc: 5, scaleKey: "major" });
+    assert.equal(a.chord.rootPc, 0);
+    assert.equal(b.chord.rootPc, 5);
+  });
+
+  test("scale explícita no step vence a escala default", () => {
+    const s = resolveSequenceStep(
+      { roman: "V7", scale: "mixolydian" },
+      { tonicPc: 0, scaleKey: "major" }
+    );
+    assert.equal(s.scale, "mixolydian");
+  });
+
+  test("auto-escala escolhe a melhor quando o step não tem scale", () => {
+    const s = resolveSequenceStep(
+      { roman: "ii7" },
+      {
+        tonicPc: 0,
+        scaleKey: "major",
+        autoScale: true,
+        scaleCandidates: ["major", "natural_minor", "phrygian"],
+      }
+    );
+    // Dm7 casa com C major ★★★ e não com C natural_minor (b3 = Eb, clash com Dm7's F) → escolhe major.
+    assert.equal(s.scale, "major");
+  });
+
+  test("bars sempre ≥ 1, floor de valores fracionários", () => {
+    const s = resolveSequenceStep({ roman: "I", bars: 2.7 }, { tonicPc: 0, scaleKey: "major" });
+    assert.equal(s.bars, 2);
+    const z = resolveSequenceStep({ roman: "I", bars: 0 }, { tonicPc: 0, scaleKey: "major" });
+    assert.equal(z.bars, 1);
+  });
+
+  test("exige roman ou chord no step", () => {
+    assert.throws(() => resolveSequenceStep({ bars: 1 }, { tonicPc: 0 }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("stepAtBar — avanço da sequência por compasso", () => {
+  const seq = resolveSequence(
+    [
+      { roman: "Imaj7", bars: 2 },
+      { roman: "V7", bars: 1 },
+      { roman: "vi7", bars: 1 },
+    ],
+    { tonicPc: 0, scaleKey: "major" }
+  );
+
+  test("total de compassos é a soma dos bars", () => {
+    const at = stepAtBar(seq, 0);
+    assert.equal(at.totalBars, 4);
+  });
+
+  test("compasso 0 e 1 ficam no primeiro step", () => {
+    assert.equal(stepAtBar(seq, 0).index, 0);
+    assert.equal(stepAtBar(seq, 0).barInStep, 0);
+    assert.equal(stepAtBar(seq, 1).index, 0);
+    assert.equal(stepAtBar(seq, 1).barInStep, 1);
+  });
+
+  test("compasso 2 é o segundo step (V7), compasso 3 é o terceiro (vi7)", () => {
+    assert.equal(stepAtBar(seq, 2).index, 1);
+    assert.equal(stepAtBar(seq, 2).barInStep, 0);
+    assert.equal(stepAtBar(seq, 3).index, 2);
+  });
+
+  test("loop: compasso 4 = 0, 5 = 1, 6 = 2…", () => {
+    assert.equal(stepAtBar(seq, 4).index, 0);
+    assert.equal(stepAtBar(seq, 6).index, 1);
+    assert.equal(stepAtBar(seq, 100).index, stepAtBar(seq, 100 % 4).index);
+  });
+
+  test("compasso negativo envolve corretamente para trás", () => {
+    assert.equal(stepAtBar(seq, -1).index, 2); // último step
+    assert.equal(stepAtBar(seq, -4).index, 0);
+  });
+
+  test("sequência vazia → null", () => {
+    assert.equal(stepAtBar([], 0), null);
+    assert.equal(stepAtBar(null, 0), null);
   });
 });
