@@ -97,13 +97,16 @@
       label: "Contrabaixo acústico",
       pattern: "samples/bank/acoustic_bass/{midi}.wav",
       fallbackKind: "acoustic_bass",
-      anchors: [31, 36, 38, 40, 45, 52, 59],
+      // Anchors = inventário real em samples/bank/acoustic_bass/.
+      // `nearestAnchorMidi` só é útil se apontar para ficheiros que existem —
+      // caso contrário o fallback cai em 404 e o acorde perde notas.
+      anchors: [30, 31, 34, 36, 38, 40, 42, 44, 45, 49, 52, 56, 59],
     },
     jazz_bass: {
       label: "Baixo elétrico (Jazz / precisão)",
       pattern: "samples/bank/jazz_bass/{midi}.wav",
       fallbackKind: "jazz_bass",
-      anchors: [28, 31, 33, 36, 38, 40, 43, 45, 48, 50, 52, 55, 57, 60, 62, 64],
+      anchors: [25, 28, 31, 34, 37, 40, 43, 46, 49, 52, 55, 58, 61, 64, 67, 70, 73],
     },
     fender_guitar: {
       label: "Guitarra elétrica (limpa)",
@@ -127,74 +130,80 @@
       label: "Clarinete",
       pattern: "samples/bank/clarinet/{midi}.wav",
       fallbackKind: "clarinet",
-      anchors: [50, 53, 55, 58, 62, 65, 70, 74, 77, 82, 86, 93],
+      anchors: [50, 53, 58, 62, 65, 70, 74, 77, 82, 86, 90],
     },
     native_flute: {
       label: "Flauta (transversal; EQ suave)",
       pattern: "samples/bank/native_flute/{midi}.wav",
       fallbackKind: "native_flute",
-      anchors: [60, 64, 67, 72, 76, 79, 84, 88, 91, 96, 100, 103],
+      anchors: [60, 64, 69, 72, 76, 81, 84, 88, 93, 96],
     },
     // --- Novos instrumentos harmónicos ---
     harmonium: {
       label: "Harmônio (pad harmônico sustentado)",
       pattern: "samples/bank/harmonium/{midi}.wav",
       fallbackKind: "harmonium",
-      anchors: [36, 41, 48, 53, 60, 65, 72, 77, 84, 89, 96],
+      // Cobertura densa 36–74 (todos os semitons exceto 66); anchors limitados
+      // ao que existe em disco para garantir fallback por vizinho sem 404.
+      anchors: [36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 67, 68, 69, 70, 71, 72, 73, 74],
     },
     harp: {
       label: "Harpa (arpejos e acordes cristalinos)",
       pattern: "samples/bank/harp/{midi}.wav",
       fallbackKind: "harp",
-      anchors: [36, 41, 48, 53, 60, 65, 72, 77, 84, 89, 96],
+      anchors: [28, 31, 35, 38, 41, 45, 48, 52, 55, 59, 62, 65, 69, 72, 76, 79, 83, 86, 89, 93, 95, 98, 101],
     },
     guitar_nylon: {
       label: "Violão de nylon (clássico / bossa)",
       pattern: "samples/bank/guitar_nylon/{midi}.wav",
       fallbackKind: "guitar_nylon",
-      anchors: [40, 45, 48, 50, 52, 55, 57, 60, 64, 67, 72, 76, 79],
+      // Inventário real em disco. Lista anterior declarava 48/60/67/72 que não
+      // existem — consequência: ao tocar o I (C-E-G em C4) só E soava, dando
+      // impressão de "uma única nota". Agora cada nota resolve para um vizinho
+      // real (59/61 para C4, 66/68 para G4) com pitch-shift de 1 semitom.
+      anchors: [35, 38, 40, 42, 44, 45, 47, 49, 50, 52, 54, 55, 57, 59, 61, 63, 64, 66, 68, 69, 71, 73, 74, 76, 78, 79, 80, 81, 82],
     },
     violin: {
       label: "Violino (solo)",
       pattern: "samples/bank/violin/{midi}.wav",
       fallbackKind: "violin",
-      anchors: [55, 60, 65, 67, 72, 76, 79, 84, 88, 91, 96],
+      anchors: [55, 57, 60, 64, 67, 69, 72, 76, 79, 81, 84, 88, 91, 93, 96],
     },
     saxophone: {
       label: "Saxofone (tenor / alto)",
       pattern: "samples/bank/saxophone/{midi}.wav",
       fallbackKind: "saxophone",
-      anchors: [48, 53, 58, 60, 65, 70, 72, 77, 82, 84],
+      anchors: [49, 50, 51, 52, 53, 54, 55, 56, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81],
     },
     trumpet: {
       label: "Trompete",
       pattern: "samples/bank/trumpet/{midi}.wav",
       fallbackKind: "trumpet",
-      anchors: [52, 55, 58, 60, 65, 67, 72, 77, 79, 84],
+      anchors: [53, 57, 60, 63, 65, 67, 70, 74, 77, 81, 84],
     },
     trombone: {
       label: "Trombone",
       pattern: "samples/bank/trombone/{midi}.wav",
       fallbackKind: "trombone",
-      anchors: [36, 41, 48, 53, 60, 65, 72],
+      anchors: [34, 37, 39, 41, 44, 46, 48, 50, 51, 53, 56, 58, 60, 61, 62, 63, 65],
     },
     french_horn: {
       label: "Trompa (french horn — pad de metais)",
       pattern: "samples/bank/french_horn/{midi}.wav",
       fallbackKind: "french_horn",
-      anchors: [36, 41, 48, 53, 60, 65, 72, 77],
+      anchors: [33, 36, 39, 43, 50, 53, 57, 60, 74, 77],
     },
     bassoon: {
       label: "Fagote (grave / reed)",
       pattern: "samples/bank/bassoon/{midi}.wav",
       fallbackKind: "bassoon",
-      anchors: [34, 36, 41, 48, 53, 60, 65],
+      anchors: [43, 45, 48, 55, 57, 60, 64, 67, 69, 72],
     },
     xylophone: {
       label: "Xilofone (pontos percussivos)",
       pattern: "samples/bank/xylophone/{midi}.wav",
       fallbackKind: "xylophone",
-      anchors: [60, 65, 72, 77, 84, 89, 96],
+      anchors: [67, 72, 79, 84, 91, 96, 103, 108],
     },
   };
 
