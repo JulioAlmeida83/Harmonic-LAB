@@ -63,27 +63,58 @@ h2 {
 }
 
 .panel-context .row,
-.panel-scale-player .row {
+.panel-scale-player .row,
+.subgroup .row {
   display: flex;
   flex-wrap: wrap;
   gap: 0.85rem 1.25rem;
   align-items: flex-end;
 }
 
-.row-harmony {
+.row-instrument {
   margin-top: 0.85rem;
   padding-top: 0.85rem;
   border-top: 1px solid var(--line);
 }
 
-.row-samples {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.85rem 1.25rem;
-  align-items: flex-end;
-  margin-top: 0.85rem;
-  padding-top: 0.85rem;
-  border-top: 1px solid var(--line);
+.subgroup {
+  margin: 1rem 0 0;
+  padding: 0.35rem 0.95rem 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.subgroup legend {
+  padding: 0 0.5rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.subgroup-tonic {
+  border-color: rgba(92, 225, 184, 0.28);
+  background: rgba(92, 225, 184, 0.03);
+}
+.subgroup-tonic legend {
+  color: var(--accent-2);
+}
+
+.subgroup-harmony {
+  border-color: rgba(108, 156, 255, 0.28);
+  background: rgba(108, 156, 255, 0.03);
+}
+.subgroup-harmony legend {
+  color: var(--accent);
+}
+
+.subgroup-bass {
+  border-color: rgba(255, 196, 88, 0.22);
+  background: rgba(255, 196, 88, 0.025);
+}
+.subgroup-bass legend {
+  color: #ffd87a;
 }
 
 .field {
@@ -158,13 +189,13 @@ h2 {
   border: 0;
 }
 
-.row-harmony #btnTonicSound {
+.subgroup-tonic #btnTonicSound {
   align-self: flex-end;
   margin-bottom: 0.1rem;
   white-space: nowrap;
 }
 
-.row-harmony #btnTonicSound.btn-primary {
+.subgroup-tonic #btnTonicSound.btn-primary {
   border-color: rgba(92, 225, 184, 0.55);
   background: linear-gradient(180deg, #1a322e, #152824);
 }
