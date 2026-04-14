@@ -38,11 +38,12 @@ jobs:
                 owner,
                 repo,
                 run_id,
-                name: 'github-pages',
                 per_page: 100,
                 page,
               });
-              collected.push(...data.artifacts);
+              collected.push(
+                ...data.artifacts.filter((a) => a.name === 'github-pages')
+              );
               if (data.artifacts.length < 100) break;
               page += 1;
             }
