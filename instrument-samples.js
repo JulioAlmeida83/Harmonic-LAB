@@ -66,6 +66,34 @@
       this.sourceVersion = 1;
       /** pluck | sustain | arpeggio */
       this.playbackStyle = "sustain";
+      /**
+       * Vozes activas — usado por `stopAllVoices()` para cortar tudo instantaneamente
+       * quando o utilizador desmarca um botão (ex.: progressão, slots, mute all).
+       * Cada entrada: { src, g, stopAt }. Removida automaticamente no `onended`.
+       * @type {Set<{src: AudioBufferSourceNode, g: GainNode, stopAt: number}>}
+       */
+      this.activeVoices = new Set();
+    }
+
+    /**
+     * Corta imediatamente (com fade curto anti-click) todas as vozes pendentes.
+     * Usar quando um controlo que gera harmonia/melodia é desactivado e o
+     * utilizador espera silêncio imediato, e não o tail natural da amostra.
+     */
+    stopAllVoices(fadeSec = 0.02) {
+      if (!this.ctx || !this.activeVoices) return;
+      const t = this.ctx.currentTime;
+      const fade = Math.max(0.005, fadeSec);
+      for (const voice of this.activeVoices) {
+        try {
+          const g = voice.g.gain;
+          g.cancelScheduledValues(t);
+          g.setValueAtTime(g.value, t);
+          g.linearRampToValueAtTime(0, t + fade);
+          try { voice.src.stop(t + fade + 0.01); } catch (_) { /* já parou */ }
+        } catch (_) { /* defensivo */ }
+      }
+      this.activeVoices.clear();
     }
 
     setFallbackKind(k) {
@@ -485,6 +513,9 @@
       const stopAt = Math.min(t0 + buf.duration / effRate + 0.12, t0 + hold + rel + 0.04);
       src.start(t0);
       src.stop(stopAt);
+      const voice = { src, g, stopAt };
+      this.activeVoices.add(voice);
+      src.onended = () => { this.activeVoices.delete(voice); };
       return true;
     }
 

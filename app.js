@@ -485,6 +485,31 @@ class AudioEngine {
     mute(this.seqGain.gain);
     if (this.scaleSampleBus) mute(this.scaleSampleBus.gain);
     if (this.harmStabBus) mute(this.harmStabBus.gain);
+    if (this.instrumentSampler && typeof this.instrumentSampler.stopAllVoices === "function") {
+      this.instrumentSampler.stopAllVoices();
+    }
+  }
+
+  /**
+   * Mute imediato de um bus específico + corte das vozes do sampler
+   * que foram lá enviadas. Usado por handlers de toggle (progressão,
+   * slots, mute all) para garantir silêncio instantâneo.
+   */
+  silenceBus(bus, fadeSec = 0.02) {
+    if (!this.ctx || !bus) return;
+    const t = this.ctx.currentTime;
+    const fade = Math.max(0.005, fadeSec);
+    bus.gain.cancelScheduledValues(t);
+    bus.gain.setValueAtTime(bus.gain.value, t);
+    bus.gain.linearRampToValueAtTime(0, t + fade);
+    bus.gain.setValueAtTime(0, t + fade + 0.005);
+  }
+
+  /** Corta todas as vozes activas do sampler (amostras em decaimento). */
+  stopSamplerVoices(fadeSec = 0.02) {
+    if (this.instrumentSampler && typeof this.instrumentSampler.stopAllVoices === "function") {
+      this.instrumentSampler.stopAllVoices(fadeSec);
+    }
   }
 
   setMaster(v) {
@@ -2337,6 +2362,12 @@ function wireProgressionControls() {
     progResolveFromUI();
     progRenderStatus();
     refreshSampleExecutionLoop();
+    // Ao desactivar a progressão: corta instantaneamente as vozes já agendadas
+    // (amostras em decaimento) e silencia o bus da harmonia para não arrastarem.
+    if (!progState.enabled && audio?.ctx) {
+      audio.silenceBus?.(audio.harmStabBus, 0.03);
+      audio.stopSamplerVoices?.(0.03);
+    }
   });
 
   auto.addEventListener("change", () => {
@@ -2550,6 +2581,29 @@ function wireGlobalControls() {
     if (el) el.addEventListener("change", onContextChange);
   });
 
+  // Handler dedicado: quando o utilizador ATIVA "Silenciar acorde da harmonia",
+  // queremos que o chord tail já despachado desapareça imediatamente — e não
+  // só nas próximas batidas. Idem para quando desliga `droneOn`, para cortar
+  // tail da tônica em modo sample.
+  const harmonyMuteChordsEl = document.getElementById("harmonyMuteChords");
+  if (harmonyMuteChordsEl) {
+    harmonyMuteChordsEl.addEventListener("change", () => {
+      if (harmonyMuteChordsEl.checked && audio?.ctx) {
+        audio.silenceBus?.(audio.harmStabBus, 0.03);
+        audio.stopSamplerVoices?.(0.03);
+      }
+    });
+  }
+  const droneOnEl = document.getElementById("droneOn");
+  if (droneOnEl) {
+    droneOnEl.addEventListener("change", () => {
+      if (!droneOnEl.checked && audio?.ctx) {
+        // Corte do tail da tônica em modo sample (pode durar alguns segundos).
+        audio.stopSamplerVoices?.(0.03);
+      }
+    });
+  }
+
   const slotInputMode = document.getElementById("slotInputMode");
   if (slotInputMode) {
     slotInputMode.addEventListener("change", () => {
@@ -2625,6 +2679,19 @@ function wireGlobalControls() {
     });
     document.querySelectorAll(".slot").forEach((s) => s.classList.remove("on"));
     updateSlotsMissingNotes();
+    // Corte imediato: ramp dos oscs dos slots para 0 + corte das amostras
+    // já agendadas (caso em modo sample). Assim o clique silencia na hora,
+    // sem esperar pelo ciclo de scheduleSyncAudio()/tail natural das amostras.
+    if (audio?.ctx) {
+      const tNow = audio.ctx.currentTime;
+      audio.slots?.forEach(({ gain }) => {
+        const gp = gain.gain;
+        gp.cancelScheduledValues(tNow);
+        gp.setValueAtTime(gp.value, tNow);
+        gp.linearRampToValueAtTime(0, tNow + 0.025);
+      });
+      audio.stopSamplerVoices?.(0.025);
+    }
     scheduleSyncAudio();
     refreshSampleExecutionLoop();
   });
@@ -2744,9 +2811,13 @@ function wireGlobalControls() {
     stopScaleLoop();
     audio.stopScale();
     stopSampleExecutionLoop();
+    // Em modo sample, notas já despachadas para o instrumentSampler ainda
+    // ficam no ar (decaimento natural). Cortamos para honrar o "■ Parar".
+    audio.stopSamplerVoices?.(0.03);
   });
 
-  // Se o utilizador desliga o loop enquanto já está a correr, cancela o reagendamento.
+  // Se o utilizador desliga o loop enquanto já está a correr, cancela o reagendamento
+  // e limpa os highlights visuais agendados para a próxima iteração.
   const seqLoopEl = document.getElementById("seqLoop");
   if (seqLoopEl) {
     seqLoopEl.addEventListener("change", () => {
@@ -2755,6 +2826,7 @@ function wireGlobalControls() {
           clearTimeout(scaleLoopTimer);
           scaleLoopTimer = null;
         }
+        clearScaleHighlights();
       }
     });
   }
@@ -2778,7 +2850,27 @@ updateSlotsMissingNotes();
 
 // Corrige eventos duplicados: preferFlats etc. recriam slots — wire apenas uma vez nos selects globais
 // rebuild slots destroy listeners inside slots — re-bind sync on container
-document.getElementById("slots").addEventListener("change", () => {
+document.getElementById("slots").addEventListener("change", (ev) => {
+  const target = ev.target;
+  // Se um checkbox dum slot foi DESMARCADO, faz mute imediato desse slot
+  // (oscs sintetizados) e corta tails de amostra. Sem isto, o oscilador
+  // do slot toca durante ~30–50 ms até o próximo scheduleSyncAudio() correr
+  // e, em modo sample, o decaimento da amostra continua audível.
+  if (target && target.matches?.('.slot input[type="checkbox"]') && !target.checked) {
+    const slotEl = target.closest(".slot");
+    const idx = Number(slotEl?.dataset?.index);
+    if (audio?.ctx && Number.isInteger(idx) && audio.slots?.[idx]) {
+      const tNow = audio.ctx.currentTime;
+      const gp = audio.slots[idx].gain.gain;
+      gp.cancelScheduledValues(tNow);
+      gp.setValueAtTime(gp.value, tNow);
+      gp.linearRampToValueAtTime(0, tNow + 0.025);
+      // O sampler não é por-slot, mas em modo sample os slots partilham o
+      // instrumentSampler; um corte global aqui é agressivo demais quando
+      // só um slot foi desmarcado. Por isso apenas o osc é silenciado;
+      // o decaimento curto da amostra é aceitável (≤0.3 s).
+    }
+  }
   updateSlotsMissingNotes();
   scheduleSyncAudio();
   refreshSampleExecutionLoop();
