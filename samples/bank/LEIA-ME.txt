@@ -13,6 +13,8 @@ em scripts/download-bank.mjs — ver CREDITS.txt após correr o comando.
 Pastas (cada uma com {midi}.wav, ex.: 60.wav):
   piano/, rhodes/, cello/, acoustic_bass/, jazz_bass/, fender_guitar/, guitar_distorted/,
   acoustic_guitar/, clarinet/, native_flute/
+  harmonium/, harp/, guitar_nylon/, violin/, saxophone/, trumpet/, trombone/,
+  french_horn/, bassoon/, xylophone/
 
 Formato: WAV ou OGG mono ou estéreo, 44,1 kHz ou 48 kHz.
 

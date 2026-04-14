@@ -48,6 +48,17 @@
     acoustic_guitar: "guitar-acoustic",
     clarinet: "clarinet",
     native_flute: "flute",
+    // Novos mapeamentos para o pack remoto (tonejs-instruments)
+    harmonium: "harmonium",
+    harp: "harp",
+    guitar_nylon: "guitar-nylon",
+    violin: "violin",
+    saxophone: "saxophone",
+    trumpet: "trumpet",
+    trombone: "trombone",
+    french_horn: "french-horn",
+    bassoon: "bassoon",
+    xylophone: "xylophone",
   };
 
   const TONEJS_NOTE_NAMES = ["C", "Cs", "D", "Ds", "E", "F", "Fs", "G", "Gs", "A", "As", "B"];
@@ -123,6 +134,67 @@
       pattern: "samples/bank/native_flute/{midi}.wav",
       fallbackKind: "native_flute",
       anchors: [60, 64, 67, 72, 76, 79, 84, 88, 91, 96, 100, 103],
+    },
+    // --- Novos instrumentos harmónicos ---
+    harmonium: {
+      label: "Harmônio (pad harmônico sustentado)",
+      pattern: "samples/bank/harmonium/{midi}.wav",
+      fallbackKind: "harmonium",
+      anchors: [36, 41, 48, 53, 60, 65, 72, 77, 84, 89, 96],
+    },
+    harp: {
+      label: "Harpa (arpejos e acordes cristalinos)",
+      pattern: "samples/bank/harp/{midi}.wav",
+      fallbackKind: "harp",
+      anchors: [36, 41, 48, 53, 60, 65, 72, 77, 84, 89, 96],
+    },
+    guitar_nylon: {
+      label: "Violão de nylon (clássico / bossa)",
+      pattern: "samples/bank/guitar_nylon/{midi}.wav",
+      fallbackKind: "guitar_nylon",
+      anchors: [40, 45, 48, 50, 52, 55, 57, 60, 64, 67, 72, 76, 79],
+    },
+    violin: {
+      label: "Violino (solo)",
+      pattern: "samples/bank/violin/{midi}.wav",
+      fallbackKind: "violin",
+      anchors: [55, 60, 65, 67, 72, 76, 79, 84, 88, 91, 96],
+    },
+    saxophone: {
+      label: "Saxofone (tenor / alto)",
+      pattern: "samples/bank/saxophone/{midi}.wav",
+      fallbackKind: "saxophone",
+      anchors: [48, 53, 58, 60, 65, 70, 72, 77, 82, 84],
+    },
+    trumpet: {
+      label: "Trompete",
+      pattern: "samples/bank/trumpet/{midi}.wav",
+      fallbackKind: "trumpet",
+      anchors: [52, 55, 58, 60, 65, 67, 72, 77, 79, 84],
+    },
+    trombone: {
+      label: "Trombone",
+      pattern: "samples/bank/trombone/{midi}.wav",
+      fallbackKind: "trombone",
+      anchors: [36, 41, 48, 53, 60, 65, 72],
+    },
+    french_horn: {
+      label: "Trompa (french horn — pad de metais)",
+      pattern: "samples/bank/french_horn/{midi}.wav",
+      fallbackKind: "french_horn",
+      anchors: [36, 41, 48, 53, 60, 65, 72, 77],
+    },
+    bassoon: {
+      label: "Fagote (grave / reed)",
+      pattern: "samples/bank/bassoon/{midi}.wav",
+      fallbackKind: "bassoon",
+      anchors: [34, 36, 41, 48, 53, 60, 65],
+    },
+    xylophone: {
+      label: "Xilofone (pontos percussivos)",
+      pattern: "samples/bank/xylophone/{midi}.wav",
+      fallbackKind: "xylophone",
+      anchors: [60, 65, 72, 77, 84, 89, 96],
     },
   };
 

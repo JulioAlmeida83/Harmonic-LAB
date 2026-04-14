@@ -67,16 +67,40 @@
         <span>Instrumento (banco)</span>
         <select id="bankInstrument" disabled title="Disponível quando o áudio está ativo">
           <option value="internal">Som interno (síntese)</option>
-          <option value="piano">Piano de cauda (grand)</option>
-          <option value="rhodes">Rhodes / E-piano</option>
-          <option value="cello">Violoncelo</option>
-          <option value="acoustic_bass">Contrabaixo acústico</option>
-          <option value="jazz_bass">Baixo elétrico (Jazz / precisão)</option>
-          <option value="acoustic_guitar">Guitarra acústica</option>
-          <option value="fender_guitar">Guitarra elétrica (limpa)</option>
-          <option value="guitar_distorted">Guitarra com distorção</option>
-          <option value="clarinet">Clarinete</option>
-          <option value="native_flute">Flauta (transversal; EQ suave)</option>
+          <optgroup label="Teclados">
+            <option value="piano">Piano de cauda (grand)</option>
+            <option value="rhodes">Rhodes / E-piano</option>
+            <option value="harmonium">Harmônio (pad sustentado)</option>
+          </optgroup>
+          <optgroup label="Cordas dedilhadas">
+            <option value="acoustic_guitar">Guitarra acústica</option>
+            <option value="guitar_nylon">Violão de nylon (clássico/bossa)</option>
+            <option value="fender_guitar">Guitarra elétrica (limpa)</option>
+            <option value="guitar_distorted">Guitarra com distorção</option>
+            <option value="harp">Harpa</option>
+          </optgroup>
+          <optgroup label="Cordas friccionadas">
+            <option value="violin">Violino (solo)</option>
+            <option value="cello">Violoncelo</option>
+          </optgroup>
+          <optgroup label="Baixos">
+            <option value="acoustic_bass">Contrabaixo acústico</option>
+            <option value="jazz_bass">Baixo elétrico (Jazz / precisão)</option>
+          </optgroup>
+          <optgroup label="Sopros — madeiras">
+            <option value="clarinet">Clarinete</option>
+            <option value="bassoon">Fagote (grave)</option>
+            <option value="native_flute">Flauta (transversal)</option>
+            <option value="saxophone">Saxofone (tenor/alto)</option>
+          </optgroup>
+          <optgroup label="Sopros — metais">
+            <option value="trumpet">Trompete</option>
+            <option value="trombone">Trombone</option>
+            <option value="french_horn">Trompa (French horn)</option>
+          </optgroup>
+          <optgroup label="Percussão afinada">
+            <option value="xylophone">Xilofone</option>
+          </optgroup>
         </select>
       </label>
       <label class="field">

@@ -45,6 +45,17 @@ const SOURCES = [
   { target: "acoustic_guitar", sourceDir: "guitar-acoustic" },
   { target: "clarinet", sourceDir: "clarinet" },
   { target: "native_flute", sourceDir: "flute" },
+  // --- Novos instrumentos harmónicos ---
+  { target: "harmonium", sourceDir: "harmonium" },
+  { target: "harp", sourceDir: "harp" },
+  { target: "guitar_nylon", sourceDir: "guitar-nylon" },
+  { target: "violin", sourceDir: "violin" },
+  { target: "saxophone", sourceDir: "saxophone" },
+  { target: "trumpet", sourceDir: "trumpet" },
+  { target: "trombone", sourceDir: "trombone" },
+  { target: "french_horn", sourceDir: "french-horn" },
+  { target: "bassoon", sourceDir: "bassoon" },
+  { target: "xylophone", sourceDir: "xylophone" },
 ];
 
 const CREDITS = `Créditos — amostras descarregadas automaticamente
@@ -58,7 +69,9 @@ Fonte principal:
 Mapeamento local (tonejs-instruments / samples):
   piano, rhodes (organ), cello, acoustic_bass (contrabass)
   jazz_bass (bass-electric), fender_guitar e guitar_distorted (guitar-electric),
-  acoustic_guitar (guitar-acoustic), clarinet, native_flute (flute sinfónica)
+  acoustic_guitar (guitar-acoustic), clarinet, native_flute (flute sinfónica),
+  harmonium (harmonium), harp (harp), guitar_nylon (guitar-nylon), violin,
+  saxophone, trumpet, trombone, french_horn (french-horn), bassoon, xylophone
 
 Nomes de ficheiro do pack (ex.: As3, Cs4): «s» = sustenido (A# , C# , …).
 

@@ -502,6 +502,195 @@
         lp.connect(pkf);
         pkf.connect(hs);
         hs.connect(dest);
+      } else if (this.fallbackKind === "harmonium") {
+        // Realce harmônico sustentado (reed + corpo de madeira).
+        const lp = this.ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = 3800;
+        lp.Q.value = 0.6;
+        const pkf = this.ctx.createBiquadFilter();
+        pkf.type = "peaking";
+        pkf.frequency.value = 520;
+        pkf.Q.value = 1.2;
+        pkf.gain.value = 3.0;
+        const ls = this.ctx.createBiquadFilter();
+        ls.type = "lowshelf";
+        ls.frequency.value = 260;
+        ls.gain.value = 2.0;
+        g.connect(lp);
+        lp.connect(pkf);
+        pkf.connect(ls);
+        ls.connect(dest);
+      } else if (this.fallbackKind === "harp") {
+        // Cristalino, com corpo nos graves. HP suave e realce em 1.6 kHz.
+        const hp = this.ctx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.value = 80;
+        const pkf = this.ctx.createBiquadFilter();
+        pkf.type = "peaking";
+        pkf.frequency.value = 1600;
+        pkf.Q.value = 0.9;
+        pkf.gain.value = 2.6;
+        const hs = this.ctx.createBiquadFilter();
+        hs.type = "highshelf";
+        hs.frequency.value = 5600;
+        hs.gain.value = 1.5;
+        g.connect(hp);
+        hp.connect(pkf);
+        pkf.connect(hs);
+        hs.connect(dest);
+      } else if (this.fallbackKind === "guitar_nylon") {
+        // Nylon — mais escuro e quente que a acústica; realce em 800 Hz.
+        const lp = this.ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = 2600;
+        lp.Q.value = 0.7;
+        const pkf = this.ctx.createBiquadFilter();
+        pkf.type = "peaking";
+        pkf.frequency.value = 820;
+        pkf.Q.value = 1.0;
+        pkf.gain.value = 3.0;
+        const hs = this.ctx.createBiquadFilter();
+        hs.type = "highshelf";
+        hs.frequency.value = 4800;
+        hs.gain.value = -2.2;
+        g.connect(lp);
+        lp.connect(pkf);
+        pkf.connect(hs);
+        hs.connect(dest);
+      } else if (this.fallbackKind === "violin") {
+        // Brilho em 2.5 kHz + corpo em 400 Hz; HP para limpar graves.
+        const hp = this.ctx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.value = 180;
+        const pkBody = this.ctx.createBiquadFilter();
+        pkBody.type = "peaking";
+        pkBody.frequency.value = 400;
+        pkBody.Q.value = 1.1;
+        pkBody.gain.value = 2.0;
+        const pkAir = this.ctx.createBiquadFilter();
+        pkAir.type = "peaking";
+        pkAir.frequency.value = 2500;
+        pkAir.Q.value = 0.9;
+        pkAir.gain.value = 3.2;
+        g.connect(hp);
+        hp.connect(pkBody);
+        pkBody.connect(pkAir);
+        pkAir.connect(dest);
+      } else if (this.fallbackKind === "saxophone") {
+        // Corpo médio-forte (500 Hz) e "rasgo" em 2 kHz; LP a 5.5 kHz.
+        const lp = this.ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = 5500;
+        lp.Q.value = 0.55;
+        const pkBody = this.ctx.createBiquadFilter();
+        pkBody.type = "peaking";
+        pkBody.frequency.value = 500;
+        pkBody.Q.value = 1.2;
+        pkBody.gain.value = 2.6;
+        const pkEdge = this.ctx.createBiquadFilter();
+        pkEdge.type = "peaking";
+        pkEdge.frequency.value = 2000;
+        pkEdge.Q.value = 0.95;
+        pkEdge.gain.value = 3.2;
+        g.connect(lp);
+        lp.connect(pkBody);
+        pkBody.connect(pkEdge);
+        pkEdge.connect(dest);
+      } else if (this.fallbackKind === "trumpet") {
+        // Brilhante/penetrante: HP 140 Hz, bump em 1.5 kHz e 3.2 kHz.
+        const hp = this.ctx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.value = 140;
+        const pkMid = this.ctx.createBiquadFilter();
+        pkMid.type = "peaking";
+        pkMid.frequency.value = 1500;
+        pkMid.Q.value = 1.0;
+        pkMid.gain.value = 3.0;
+        const pkHi = this.ctx.createBiquadFilter();
+        pkHi.type = "peaking";
+        pkHi.frequency.value = 3200;
+        pkHi.Q.value = 0.85;
+        pkHi.gain.value = 2.5;
+        g.connect(hp);
+        hp.connect(pkMid);
+        pkMid.connect(pkHi);
+        pkHi.connect(dest);
+      } else if (this.fallbackKind === "trombone") {
+        // Grave encorpado, LP em 4.2 kHz, realce em 350 Hz.
+        const lp = this.ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = 4200;
+        lp.Q.value = 0.6;
+        const pkBody = this.ctx.createBiquadFilter();
+        pkBody.type = "peaking";
+        pkBody.frequency.value = 350;
+        pkBody.Q.value = 1.2;
+        pkBody.gain.value = 3.2;
+        const ls = this.ctx.createBiquadFilter();
+        ls.type = "lowshelf";
+        ls.frequency.value = 160;
+        ls.gain.value = 2.0;
+        g.connect(lp);
+        lp.connect(pkBody);
+        pkBody.connect(ls);
+        ls.connect(dest);
+      } else if (this.fallbackKind === "french_horn") {
+        // Mellow / warm: LP 3.5 kHz, bump suave em 600 Hz, HS -3 dB.
+        const lp = this.ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = 3500;
+        lp.Q.value = 0.58;
+        const pkBody = this.ctx.createBiquadFilter();
+        pkBody.type = "peaking";
+        pkBody.frequency.value = 600;
+        pkBody.Q.value = 1.0;
+        pkBody.gain.value = 2.5;
+        const hs = this.ctx.createBiquadFilter();
+        hs.type = "highshelf";
+        hs.frequency.value = 4500;
+        hs.gain.value = -3.0;
+        g.connect(lp);
+        lp.connect(pkBody);
+        pkBody.connect(hs);
+        hs.connect(dest);
+      } else if (this.fallbackKind === "bassoon") {
+        // Grave com reed: HP 70 Hz, realce em 280 Hz, LP 3.8 kHz.
+        const hp = this.ctx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.value = 70;
+        const pkBody = this.ctx.createBiquadFilter();
+        pkBody.type = "peaking";
+        pkBody.frequency.value = 280;
+        pkBody.Q.value = 1.1;
+        pkBody.gain.value = 3.2;
+        const lp = this.ctx.createBiquadFilter();
+        lp.type = "lowpass";
+        lp.frequency.value = 3800;
+        lp.Q.value = 0.55;
+        g.connect(hp);
+        hp.connect(pkBody);
+        pkBody.connect(lp);
+        lp.connect(dest);
+      } else if (this.fallbackKind === "xylophone") {
+        // Percussivo e brilhante: HP 250 Hz, bump em 3 kHz e 5 kHz.
+        const hp = this.ctx.createBiquadFilter();
+        hp.type = "highpass";
+        hp.frequency.value = 250;
+        const pk1 = this.ctx.createBiquadFilter();
+        pk1.type = "peaking";
+        pk1.frequency.value = 3000;
+        pk1.Q.value = 1.0;
+        pk1.gain.value = 3.0;
+        const pk2 = this.ctx.createBiquadFilter();
+        pk2.type = "peaking";
+        pk2.frequency.value = 5500;
+        pk2.Q.value = 0.9;
+        pk2.gain.value = 2.6;
+        g.connect(hp);
+        hp.connect(pk1);
+        pk1.connect(pk2);
+        pk2.connect(dest);
       } else {
         const lp = this.ctx.createBiquadFilter();
         lp.type = "lowpass";
