@@ -1584,6 +1584,22 @@ const PROG_AUTO_SCALE_CANDIDATES = [
   "melodic_minor_asc",
 ];
 
+/**
+ * Detecta se `val` parece um grau romano (ex.: "ii7", "bVII", "V7/V") ou um
+ * acorde absoluto (ex.: "Cm7", "F#m7b5"). Heurística simples baseada no
+ * primeiro caractere relevante — suficiente para o uso actual em que a
+ * segunda parte é sempre uma qualidade válida.
+ */
+function progDetectMode(val) {
+  const s = (val || "").trim();
+  if (!s) return "roman";
+  // Romanos começam (opc.) por acidente e por i/v/I/V.
+  if (/^[b#♭♯]?[ivIV]+/.test(s)) return "roman";
+  // Absolutos começam em A..G (qualquer case para B♭ → tipicamente maiúsculo).
+  if (/^[A-Ga-g]/.test(s)) return "chord";
+  return "roman";
+}
+
 function progReadSteps() {
   // Coleta os steps a partir da UI (inputs dentro de #progStepsEditor).
   const editor = document.getElementById("progStepsEditor");
@@ -1591,13 +1607,12 @@ function progReadSteps() {
   const rows = editor.querySelectorAll(".prog-step");
   const out = [];
   rows.forEach((row) => {
-    const mode = row.querySelector('select[data-field="mode"]')?.value || "roman";
     const val = row.querySelector('input[data-field="value"]')?.value.trim() || "";
     const bars = Math.max(1, Math.floor(Number(row.querySelector('input[data-field="bars"]')?.value) || 1));
     const scaleKey = row.querySelector('select[data-field="scale"]')?.value || "";
     if (!val) return;
     const step = { bars };
-    if (mode === "chord") step.chord = val;
+    if (progDetectMode(val) === "chord") step.chord = val;
     else step.roman = val;
     if (scaleKey) step.scale = scaleKey;
     out.push(step);
@@ -1634,20 +1649,24 @@ function progRenderRow(rawStep, index) {
   label.textContent = `#${index + 1}`;
   row.appendChild(label);
 
-  const modeSel = document.createElement("select");
-  modeSel.dataset.field = "mode";
-  modeSel.title = "Romano: transpõe com a tônica. Absoluto: fixo (ex.: Cmaj7).";
-  [
-    ["roman", "Romano"],
-    ["chord", "Acorde"],
-  ].forEach(([v, t]) => {
-    const o = document.createElement("option");
-    o.value = v;
-    o.textContent = t;
-    modeSel.appendChild(o);
-  });
-  modeSel.value = rawStep.chord ? "chord" : "roman";
-  row.appendChild(modeSel);
+  const valInput = document.createElement("input");
+  valInput.type = "text";
+  valInput.dataset.field = "value";
+  valInput.value = rawStep.chord || rawStep.roman || "";
+  valInput.placeholder = "ii7 ou Cmaj7";
+  valInput.spellcheck = false;
+  valInput.title = "Grau romano (ii7, V7, bVII, V7/V…) ou acorde absoluto (Cmaj7, Am7…).";
+  row.appendChild(valInput);
+
+  // Cifra resolvida (read-only): mostra o acorde que será tocado na tónica
+  // actual (ex.: "Am7" para vi7 em C maior). Atualizada por progRefreshCifras.
+  const cifra = document.createElement("span");
+  cifra.className = "prog-step-cifra";
+  cifra.dataset.field = "cifra";
+  cifra.setAttribute("aria-live", "polite");
+  cifra.title = "Cifra resolvida (tónica atual)";
+  cifra.textContent = "—";
+  row.appendChild(cifra);
 
   const barsInput = document.createElement("input");
   barsInput.type = "number";
@@ -1659,14 +1678,6 @@ function progRenderRow(rawStep, index) {
   barsInput.title = "Compassos (4/4)";
   row.appendChild(barsInput);
 
-  const valInput = document.createElement("input");
-  valInput.type = "text";
-  valInput.dataset.field = "value";
-  valInput.value = rawStep.chord || rawStep.roman || "";
-  valInput.placeholder = rawStep.chord ? "Cmaj7" : "ii7";
-  valInput.spellcheck = false;
-  row.appendChild(valInput);
-
   const removeBtn = document.createElement("button");
   removeBtn.type = "button";
   removeBtn.className = "prog-step-remove";
@@ -1676,6 +1687,7 @@ function progRenderRow(rawStep, index) {
     row.remove();
     progRelabelRows();
     progResolveFromUI();
+    progRefreshCifras();
     progRenderStatus();
   });
   row.appendChild(removeBtn);
@@ -1700,13 +1712,12 @@ function progRenderRow(rawStep, index) {
   row.appendChild(scaleSel);
 
   const onChange = () => {
-    const useChord = modeSel.value === "chord";
-    valInput.placeholder = useChord ? "Cmaj7" : "ii7";
     progResolveFromUI();
+    progRefreshCifras();
     progRenderStatus();
   };
-  modeSel.addEventListener("change", onChange);
   valInput.addEventListener("change", onChange);
+  valInput.addEventListener("input", onChange);
   barsInput.addEventListener("change", onChange);
   scaleSel.addEventListener("change", onChange);
 
@@ -1729,9 +1740,37 @@ function progRenderEditor(rawSteps) {
   if (!editor) return;
   editor.innerHTML = "";
   rawSteps.forEach((s, i) => editor.appendChild(progRenderRow(s, i)));
-  // Restaura o highlight após (re)render — especialmente útil ao carregar um
-  // preset enquanto a sequência já está em execução.
+  // Resolve e preenche cifras, depois restaura highlight (útil se a sequência
+  // já estava em execução quando o preset foi carregado).
+  progRefreshCifras();
   progRenderStatus();
+}
+
+/**
+ * Formata a cifra resolvida de um step (ex.: "Am7", "Cmaj7", "F#7").
+ * Usa a tónica e a qualidade já resolvidas em `resolved.chord`, honrando a
+ * preferência de sustenidos/bemóis do utilizador.
+ */
+function progFormatCifra(chord) {
+  if (!chord || typeof chord.rootPc !== "number") return "";
+  const name = pcToName(chord.rootPc, preferFlats());
+  return name + (chord.quality || "");
+}
+
+/**
+ * Atualiza o `<span class="prog-step-cifra">` de cada linha do editor com a
+ * cifra resolvida (tónica actual). Se um step não resolve, mostra "—".
+ */
+function progRefreshCifras() {
+  const editor = document.getElementById("progStepsEditor");
+  if (!editor) return;
+  const rows = editor.querySelectorAll(".prog-step");
+  rows.forEach((row, i) => {
+    const cifra = row.querySelector('.prog-step-cifra');
+    if (!cifra) return;
+    const resolved = progState.resolved[i];
+    cifra.textContent = resolved ? progFormatCifra(resolved.chord) : "—";
+  });
 }
 
 /**
@@ -1847,6 +1886,7 @@ function progLoadPreset(key) {
   }
   progRenderEditor(preset.steps);
   progResolveFromUI();
+  progRefreshCifras();
   progRenderStatus();
 }
 
@@ -1944,6 +1984,7 @@ function wireProgressionControls() {
   auto.addEventListener("change", () => {
     progState.autoScale = auto.checked;
     progResolveFromUI();
+    progRefreshCifras();
     progRenderStatus();
   });
 
@@ -1966,6 +2007,7 @@ function wireProgressionControls() {
     const newRaw = { roman: "I", bars: 1 };
     editor.appendChild(progRenderRow(newRaw, rows.length));
     progResolveFromUI();
+    progRefreshCifras();
     progRenderStatus();
   });
 
@@ -2105,8 +2147,10 @@ function wireGlobalControls() {
     refreshAllSlotsUI();
     updateSlotsMissingNotes();
     updateScaleStarLabels();
-    // Tônica ou escala mudou → re-resolver romanos da sequência.
+    // Tônica ou escala mudou → re-resolver romanos da sequência e actualizar
+    // cifras (ex.: vi7 que mostrava "Am7" em C, passa a "Dm7" em F).
     progResolveFromUI();
+    progRefreshCifras();
     progRenderStatus();
     scheduleSyncAudio();
     refreshSampleExecutionLoop();
