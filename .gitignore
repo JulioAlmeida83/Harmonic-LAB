@@ -4,3 +4,6 @@ Thumbs.db
 *.log
 .env
 .env.*
+
+# Pastas internas de agentes (worktrees efémeros)
+.claude/

@@ -1,0 +1,35 @@
+# Continuous Integration — executa a suíte de testes do núcleo teórico.
+#
+# A suíte vive em `tests/` e depende apenas do runner nativo de testes
+# do Node 20+ (`node --test`). Sem jest, sem babel, sem jsdom.
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run theory suite
+        run: npm test
+
+      - name: Syntax check scripts
+        run: |
+          node -c theory.js
+          node -c app.js
