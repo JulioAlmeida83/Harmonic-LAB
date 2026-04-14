@@ -880,6 +880,23 @@ function syncBankSamplerFromUI() {
   }
 }
 
+// Id do instrumento activo (selecionado no UI). Usado pelo normalizador de
+// acordes para escolher perfil (range/sweet/gain/character).
+function currentBankId() {
+  return document.getElementById("bankInstrument")?.value || "piano";
+}
+
+// Aplica estilo "pluck" se o perfil do instrumento for percussivo
+// (ex.: xilofone) e o padrão pedido for sustain — caso contrário devolve
+// o estilo original. Centraliza a lógica para harmonia e baixo.
+function resolveStyleOverride(baseStyle, norm) {
+  if (!norm || !norm.styleOverride) return baseStyle;
+  if (baseStyle === "sustain" || baseStyle === "block_whole" || baseStyle === "block_half") {
+    return norm.styleOverride;
+  }
+  return baseStyle;
+}
+
 function currentBpm() {
   const v = Number(document.getElementById("globalBpm")?.value || 96);
   return Math.max(40, Math.min(220, Number.isFinite(v) ? v : 96));
@@ -1594,9 +1611,17 @@ function refreshSampleExecutionLoop() {
       : document.getElementById("harmonyBase")?.value ?? "off";
     const muteHarmChords = harmonyChordSamplesMuted();
     if (!slotsIsolated && harmIdRaw !== "off" && !muteHarmChords && audio.harmStabBus) {
-      const harmMidis = progStep
+      const harmMidisRaw = progStep
         ? chordMidisAbsolute(progStep.step.chord, baseOct)
         : harmonyMidis(tcp, harmonyRefIvals(), harmIdRaw, baseOct);
+      // --- Normalização por instrumento ---------------------------------
+      // Garante que o MESMO acorde soa "igual" em qualquer fonte sonora:
+      // registro dentro do sweet-spot do instrumento, ganho calibrado, e
+      // override de articulação (pluck) para packs percussivos.
+      const normH = globalThis.HLChordNormalizer
+        ? HLChordNormalizer.normalizeChord(harmMidisRaw, currentBankId())
+        : { midis: harmMidisRaw, gainScale: 1, styleOverride: undefined };
+      const harmMidis = normH.midis;
       const harmVol = Number(document.getElementById("harmVol").value) / 100;
       // Ganho extra aplicado só quando a sequência está ativa. Permite
       // destacá-la em relação à harmonia estática sem forçar o utilizador
@@ -1606,8 +1631,11 @@ function refreshSampleExecutionLoop() {
       // Em progressão, abrimos o teto do peak (até 0.32) para que o slider
       // consiga efetivamente aumentar. Sem isso o clamp em 0.16 mascara o boost.
       const peakHi = progStep ? 0.32 : 0.16;
-      const peak = Math.max(0.04, Math.min(peakHi, harmVol * 0.14 * progBoost));
-      const harmonyStyle = document.getElementById("harmonyStyle")?.value || "sustain";
+      // gainScale do perfil aplicado ANTES do clamp: equaliza loudness entre
+      // packs (trompete "hot" desce ~0.9, fagote/contrabaixo sobem ~1.05–1.10).
+      const peak = Math.max(0.04, Math.min(peakHi, harmVol * 0.14 * progBoost * (normH.gainScale ?? 1)));
+      const harmonyStyleRaw = document.getElementById("harmonyStyle")?.value || "sustain";
+      const harmonyStyle = resolveStyleOverride(harmonyStyleRaw, normH);
       const absBeat = sampleHarmonyBeatIndex;
       // Teto de segurança por nota (anti-clip): mais alto quando em progressão.
       const perNoteCap = progStep ? 0.42 : 0.22;
@@ -1673,15 +1701,18 @@ function refreshSampleExecutionLoop() {
       );
       sampleBassPatIndex += 1;
       if (bMidiRaw != null) {
-        // Em vez de clamp (que dobra notas para a mesma altura nos extremos),
-        // transpõe por oitavas até cair no intervalo audível — preserva a relação harmônica.
-        let bMidi = bMidiRaw;
-        while (bMidi < 28) bMidi += 12;
-        while (bMidi > 108) bMidi -= 12;
+        // Normalização por instrumento: desloca por oitavas até ao sweet-spot
+        // do pack activo (ex.: contrabaixo → MIDI 28–48), aplica gainScale
+        // específico e força "pluck" se o perfil for percussivo.
+        const normB = globalThis.HLChordNormalizer
+          ? HLChordNormalizer.normalizeSingleNote(bMidiRaw, currentBankId())
+          : { midi: bMidiRaw, gainScale: 1, styleOverride: undefined };
+        const bMidi = normB.midi;
         const bassVol = Number(document.getElementById("harmonyBassVol")?.value ?? 44) / 100;
-        const bPeak = Math.max(0.04, Math.min(0.2, bassVol * 0.17));
-        const hStyleRaw = document.getElementById("harmonyStyle")?.value || "sustain";
-        const hStyle = hStyleRaw === "arpeggio_full" ? "sustain" : hStyleRaw;
+        const bPeak = Math.max(0.04, Math.min(0.2, bassVol * 0.17 * (normB.gainScale ?? 1)));
+        const hStyleRaw0 = document.getElementById("harmonyStyle")?.value || "sustain";
+        const hStyleRaw = hStyleRaw0 === "arpeggio_full" ? "sustain" : hStyleRaw0;
+        const hStyle = resolveStyleOverride(hStyleRaw, normB);
         // Duração: para walking bass/ostinato fica mais limpo se a nota não invade
         // o próximo tempo. Antes `beat * 0.98` gerava sobreposição constante com o
         // release das samples; agora ~70% do beat deixa respiro entre notas.
@@ -2227,19 +2258,24 @@ function syncAudio() {
         "travis",
         "travis_fast",
       ]);
-      const stabStyle = loopish.has(style) ? "pluck" : style;
+      const normStab = globalThis.HLChordNormalizer
+        ? HLChordNormalizer.normalizeChord(harmMidis, currentBankId())
+        : { midis: harmMidis, gainScale: 1, styleOverride: undefined };
+      const stabStyleBase = loopish.has(style) ? "pluck" : style;
+      const stabStyle = resolveStyleOverride(stabStyleBase, normStab);
+      const stabPeak = 0.1 * (normStab.gainScale ?? 1);
       executeHarmonyPattern({
         styleKey: stabStyle,
-        chord: harmMidis,
+        chord: normStab.midis,
         beat: 0.26,
         absBeat: 0,
-        peak: 0.1,
+        peak: stabPeak,
         schedule: ({ midi, offset, dur, style: st, velMult }) => {
           audio.instrumentSampler.playNoteAt(
             audio.harmStabBus,
             midi,
             t + offset,
-            0.1 * (velMult ?? 1),
+            stabPeak * (velMult ?? 1),
             Math.min(0.4, dur),
             st
           );
