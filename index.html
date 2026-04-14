@@ -161,11 +161,41 @@
         </label>
         <label class="field is-advanced">
           <span>Execução harmonia</span>
-          <select id="harmonyStyle" title="Articulação específica da harmonia base">
-            <option value="pluck">Pizzicato / Pluck</option>
-            <option value="sustain" selected>Contínuo / Sustain</option>
-            <option value="arpeggio">Arpejo (1 nota / batida)</option>
-            <option value="arpeggio_full">Arpejo completo (todas as notas / batida)</option>
+          <select id="harmonyStyle" title="Articulação/padrão rítmico com que a harmonia é tocada. Inclui arpejos clássicos, batidas (bossa, reggae, rock, samba) e fingerpicking (Travis).">
+            <optgroup label="Bloco / sustain">
+              <option value="sustain" selected>Contínuo / Sustain</option>
+              <option value="pluck">Pizzicato / Pluck</option>
+              <option value="block_whole">Bloco — 1 por compasso</option>
+              <option value="block_half">Bloco — tempos 1 e 3</option>
+              <option value="chord_pulse_4">Pulso em semínimas</option>
+              <option value="chord_pulse_8">Pulso em colcheias</option>
+            </optgroup>
+            <optgroup label="Arpejos simples">
+              <option value="arpeggio">Arpejo ascendente (1 nota/batida)</option>
+              <option value="arp_down">Arpejo descendente</option>
+              <option value="arp_updown">Arpejo sobe-desce</option>
+              <option value="arpeggio_full">Arpejo completo (todas / batida)</option>
+              <option value="arp_up_8">Arpejo ascend. em colcheias</option>
+              <option value="arp_down_8">Arpejo descend. em colcheias</option>
+            </optgroup>
+            <optgroup label="Arpejos clássicos">
+              <option value="alberti">Alberti clássico (1–5–3–5)</option>
+              <option value="alberti_rev">Alberti invertido (1–3–5–3)</option>
+              <option value="broken_1351">Quebrado 1–3–5–1'</option>
+              <option value="broken_1535">Quebrado 1–5–3–5 (colcheias)</option>
+            </optgroup>
+            <optgroup label="Batidas">
+              <option value="strum_ballad">Balada (1 e 3)</option>
+              <option value="strum_rock_8">Rock — colcheias</option>
+              <option value="strum_bossa">Bossa — sincopada</option>
+              <option value="strum_samba">Samba — 16ths</option>
+              <option value="strum_reggae">Reggae — off-beats (2 e 4)</option>
+              <option value="strum_charleston">Charleston (jazz)</option>
+            </optgroup>
+            <optgroup label="Fingerpicking">
+              <option value="travis">Travis picking</option>
+              <option value="travis_fast">Travis rápido</option>
+            </optgroup>
           </select>
         </label>
         <label class="field field-check is-advanced">

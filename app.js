@@ -820,6 +820,7 @@ let syncAudioRaf = 0;
 let sampleStepTimer = null;
 let sampleTonicNextAt = 0;
 let sampleHarmonyArpIndex = 0;
+let sampleHarmonyBeatIndex = 0; // avança em TODAS as batidas (não só arpejo)
 let sampleSlotsArpIndex = 0;
 let sampleBassPatIndex = 0;
 /** Token / timer do loop da escala (cada «Tocar» incrementa o token). */
@@ -882,9 +883,347 @@ function stopSampleExecutionLoop() {
   }
   sampleTonicNextAt = 0;
   sampleHarmonyArpIndex = 0;
+  sampleHarmonyBeatIndex = 0;
   sampleSlotsArpIndex = 0;
   sampleBassPatIndex = 0;
 }
+
+// ---------------------------------------------------------------------------
+// Padrões de execução da harmonia (batidas / arpejos)
+//
+// Cada padrão declara como o acorde deve ser tocado em cada batida. Recebe um
+// contexto `ctx = { chord: int[], beat: seconds, absBeat: int, peak: number }`
+// e agenda eventos via `play({ midi|midis, offset, dur, style, velMult })`.
+//
+// `absBeat` é o índice global de batida desde o arranque do loop (cresce
+// monotonamente, independente do estilo). `absBeat % 4` dá o beat-in-bar.
+// `beat` é a duração de uma batida em segundos (derivada do BPM).
+//
+// Convenções para selecionar notas do acorde:
+//   - "all"            → acorde completo
+//   - "root"|"bass"    → índice 0 (fundamental)
+//   - int              → índice explícito (clampado ao tamanho do acorde)
+//   - "arp_up" / "arp_down" / "arp_updown" → cíclico a partir de absBeat
+// ---------------------------------------------------------------------------
+
+/** Devolve o MIDI da nota seleccionada pelo `sel` (string|int). */
+function harmonyPickNote(chord, sel, absBeat) {
+  if (!chord || chord.length === 0) return null;
+  const n = chord.length;
+  if (typeof sel === "number") return chord[Math.max(0, Math.min(n - 1, sel))];
+  switch (sel) {
+    case "bass":
+    case "root":
+      return chord[0];
+    case "third":
+      return chord[Math.min(1, n - 1)];
+    case "fifth":
+      return chord[Math.min(2, n - 1)];
+    case "seventh":
+      return chord[Math.min(3, n - 1)];
+    case "top":
+      return chord[n - 1];
+    case "arp_up":
+      return chord[absBeat % n];
+    case "arp_down":
+      return chord[(n - 1 - (absBeat % n) + n) % n];
+    case "arp_updown": {
+      const period = Math.max(2, (n - 1) * 2);
+      const i = absBeat % period;
+      return chord[i < n ? i : period - i];
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Dispatcher central. Agenda todos os eventos do padrão `styleKey` para a
+ * batida corrente. Devolve o número de eventos agendados (útil em testes).
+ */
+function executeHarmonyPattern({ styleKey, chord, beat, absBeat, peak, schedule }) {
+  const pat = HARMONY_EXEC_PATTERNS[styleKey];
+  if (!pat || !chord || !chord.length) {
+    // Fallback seguro: acorde inteiro em sustain.
+    chord?.forEach((m) => schedule({ midi: m, offset: 0, dur: Math.max(beat * 0.95, 0.5), style: "sustain", velMult: 1 }));
+    return chord?.length || 0;
+  }
+  let count = 0;
+  const emit = (ev) => {
+    // ev: { select|midi|midis, offset(beats), dur(beats), style, velMult }
+    const style = ev.style || "sustain";
+    const offsetSec = (ev.offset ?? 0) * beat;
+    const durSec = Math.max(0.08, (ev.dur ?? 1) * beat);
+    const vm = ev.velMult ?? 1;
+    if (Array.isArray(ev.midis)) {
+      for (const m of ev.midis) {
+        schedule({ midi: m, offset: offsetSec, dur: durSec, style, velMult: vm });
+        count++;
+      }
+    } else if (typeof ev.midi === "number") {
+      schedule({ midi: ev.midi, offset: offsetSec, dur: durSec, style, velMult: vm });
+      count++;
+    } else if (ev.select === "all") {
+      for (const m of chord) {
+        schedule({ midi: m, offset: offsetSec, dur: durSec, style, velMult: vm });
+        count++;
+      }
+    } else {
+      const m = harmonyPickNote(chord, ev.select, absBeat);
+      if (m != null) {
+        schedule({ midi: m, offset: offsetSec, dur: durSec, style, velMult: vm });
+        count++;
+      }
+    }
+  };
+  pat.exec({ chord, beat, absBeat, peak }, emit);
+  return count;
+}
+
+/** beat-in-bar (4/4): inteiro 0..3. */
+function beatInBar4(absBeat) {
+  return ((absBeat % 4) + 4) % 4;
+}
+
+const HARMONY_EXEC_PATTERNS = {
+  // --- Bloco / sustain / pluck --------------------------------------------
+  sustain: {
+    label: "Contínuo / Sustain",
+    category: "block",
+    exec(ctx, emit) {
+      emit({ select: "all", offset: 0, dur: 1.0, style: "sustain" });
+    },
+  },
+  pluck: {
+    label: "Pizzicato / Pluck",
+    category: "block",
+    exec(ctx, emit) {
+      emit({ select: "all", offset: 0, dur: 0.6, style: "pluck" });
+    },
+  },
+  block_whole: {
+    label: "Bloco — 1 por compasso (semibreve)",
+    category: "block",
+    exec(ctx, emit) {
+      if (beatInBar4(ctx.absBeat) === 0)
+        emit({ select: "all", offset: 0, dur: 3.9, style: "sustain" });
+    },
+  },
+  block_half: {
+    label: "Bloco — tempo 1 e 3 (mínimas)",
+    category: "block",
+    exec(ctx, emit) {
+      const b = beatInBar4(ctx.absBeat);
+      if (b === 0 || b === 2)
+        emit({ select: "all", offset: 0, dur: 1.9, style: "sustain" });
+    },
+  },
+  chord_pulse_4: {
+    label: "Pulso em semínimas (todas as batidas)",
+    category: "block",
+    exec(ctx, emit) {
+      emit({ select: "all", offset: 0, dur: 0.9, style: "pluck" });
+    },
+  },
+  chord_pulse_8: {
+    label: "Pulso em colcheias",
+    category: "block",
+    exec(ctx, emit) {
+      emit({ select: "all", offset: 0, dur: 0.42, style: "pluck" });
+      emit({ select: "all", offset: 0.5, dur: 0.42, style: "pluck", velMult: 0.85 });
+    },
+  },
+
+  // --- Arpejos simples ----------------------------------------------------
+  arpeggio: {
+    label: "Arpejo — 1 nota / batida (cíclico)",
+    category: "arp",
+    exec(ctx, emit) {
+      emit({ select: "arp_up", offset: 0, dur: 0.9, style: "arpeggio" });
+    },
+  },
+  arp_down: {
+    label: "Arpejo descendente — 1 nota / batida",
+    category: "arp",
+    exec(ctx, emit) {
+      emit({ select: "arp_down", offset: 0, dur: 0.9, style: "arpeggio" });
+    },
+  },
+  arp_updown: {
+    label: "Arpejo sobe-desce — 1 nota / batida",
+    category: "arp",
+    exec(ctx, emit) {
+      emit({ select: "arp_updown", offset: 0, dur: 0.9, style: "arpeggio" });
+    },
+  },
+  arpeggio_full: {
+    label: "Arpejo completo — todas as notas num beat",
+    category: "arp",
+    exec(ctx, emit) {
+      const n = ctx.chord.length || 1;
+      const gap = Math.max(0.04, Math.min(0.3, 1 / (n + 1)));
+      const dur = Math.min(0.8, gap * 2.8);
+      for (let i = 0; i < n; i++) {
+        emit({ midi: ctx.chord[i], offset: i * gap, dur, style: "arpeggio" });
+      }
+    },
+  },
+  arp_up_8: {
+    label: "Arpejo ascendente em colcheias",
+    category: "arp",
+    exec(ctx, emit) {
+      const a = (ctx.absBeat * 2) % (ctx.chord.length || 1);
+      const b = (ctx.absBeat * 2 + 1) % (ctx.chord.length || 1);
+      emit({ midi: ctx.chord[a], offset: 0, dur: 0.45, style: "arpeggio" });
+      emit({ midi: ctx.chord[b], offset: 0.5, dur: 0.45, style: "arpeggio", velMult: 0.9 });
+    },
+  },
+  arp_down_8: {
+    label: "Arpejo descendente em colcheias",
+    category: "arp",
+    exec(ctx, emit) {
+      const n = ctx.chord.length || 1;
+      const a = (n - 1 - ((ctx.absBeat * 2) % n) + n) % n;
+      const b = (n - 1 - ((ctx.absBeat * 2 + 1) % n) + n) % n;
+      emit({ midi: ctx.chord[a], offset: 0, dur: 0.45, style: "arpeggio" });
+      emit({ midi: ctx.chord[b], offset: 0.5, dur: 0.45, style: "arpeggio", velMult: 0.9 });
+    },
+  },
+
+  // --- Arpejos clássicos (tipo Alberti) -----------------------------------
+  alberti: {
+    label: "Alberti clássico (1–5–3–5)",
+    category: "arp_classic",
+    exec(ctx, emit) {
+      // Padrão por compasso: índices 0, 2, 1, 2 (root, 5, 3, 5).
+      const seq = [0, 2, 1, 2];
+      const idx = seq[beatInBar4(ctx.absBeat)];
+      emit({ select: idx, offset: 0, dur: 0.95, style: "arpeggio" });
+    },
+  },
+  alberti_rev: {
+    label: "Alberti invertido (1–3–5–3)",
+    category: "arp_classic",
+    exec(ctx, emit) {
+      const seq = [0, 1, 2, 1];
+      const idx = seq[beatInBar4(ctx.absBeat)];
+      emit({ select: idx, offset: 0, dur: 0.95, style: "arpeggio" });
+    },
+  },
+  broken_1351: {
+    label: "1–3–5–1' (arp ascendente por compasso)",
+    category: "arp_classic",
+    exec(ctx, emit) {
+      const seq = [0, 1, 2, 0];
+      const idx = seq[beatInBar4(ctx.absBeat)];
+      emit({ select: idx, offset: 0, dur: 0.95, style: "arpeggio" });
+    },
+  },
+  broken_1535: {
+    label: "1–5–3–5 com colcheias",
+    category: "arp_classic",
+    exec(ctx, emit) {
+      // 2 eventos por beat: (root, 5), (3, 5) — ciclo por compasso.
+      const bib = beatInBar4(ctx.absBeat);
+      const pairs = [
+        [0, 2],
+        [1, 2],
+        [0, 2],
+        [1, 2],
+      ];
+      const [a, b] = pairs[bib];
+      emit({ select: a, offset: 0, dur: 0.45, style: "arpeggio" });
+      emit({ select: b, offset: 0.5, dur: 0.45, style: "arpeggio", velMult: 0.9 });
+    },
+  },
+
+  // --- Batidas / strum / fingerpicking ------------------------------------
+  strum_ballad: {
+    label: "Balada — acorde em 1 e 3",
+    category: "strum",
+    exec(ctx, emit) {
+      const b = beatInBar4(ctx.absBeat);
+      if (b === 0) emit({ select: "all", offset: 0, dur: 1.9, style: "sustain" });
+      else if (b === 2) emit({ select: "all", offset: 0, dur: 1.9, style: "sustain", velMult: 0.9 });
+    },
+  },
+  strum_rock_8: {
+    label: "Rock — colcheias iguais",
+    category: "strum",
+    exec(ctx, emit) {
+      emit({ select: "all", offset: 0, dur: 0.4, style: "pluck" });
+      emit({ select: "all", offset: 0.5, dur: 0.4, style: "pluck", velMult: 0.8 });
+    },
+  },
+  strum_bossa: {
+    label: "Bossa — padrão 2-com. (sync. 1, 1½, 2, 3½)",
+    category: "strum",
+    exec(ctx, emit) {
+      // Padrão clássico de 2 compassos de bossa simplificado para 1 compasso:
+      // Beat 0: down forte; 1.5: up leve; 2: down médio; 3.5: up leve.
+      const b = beatInBar4(ctx.absBeat);
+      if (b === 0) {
+        emit({ select: "all", offset: 0, dur: 0.5, style: "pluck" });
+        emit({ select: "all", offset: 1.5, dur: 0.4, style: "pluck", velMult: 0.7 });
+      } else if (b === 2) {
+        emit({ select: "all", offset: 0, dur: 0.5, style: "pluck", velMult: 0.9 });
+        emit({ select: "all", offset: 1.5, dur: 0.4, style: "pluck", velMult: 0.7 });
+      }
+    },
+  },
+  strum_samba: {
+    label: "Samba — 16ths sincopados",
+    category: "strum",
+    exec(ctx, emit) {
+      // Por batida: ^ . ^ . com acentos variáveis.
+      const b = beatInBar4(ctx.absBeat);
+      const accent = b === 0 || b === 2 ? 1 : 0.85;
+      emit({ select: "all", offset: 0, dur: 0.2, style: "pluck", velMult: accent });
+      emit({ select: "all", offset: 0.5, dur: 0.2, style: "pluck", velMult: 0.75 });
+    },
+  },
+  strum_reggae: {
+    label: "Reggae — off-beats (2 e 4)",
+    category: "strum",
+    exec(ctx, emit) {
+      const b = beatInBar4(ctx.absBeat);
+      if (b === 1 || b === 3) emit({ select: "all", offset: 0, dur: 0.3, style: "pluck" });
+    },
+  },
+  strum_charleston: {
+    label: "Charleston (jazz) — 1 e 2-and",
+    category: "strum",
+    exec(ctx, emit) {
+      const b = beatInBar4(ctx.absBeat);
+      if (b === 0) emit({ select: "all", offset: 0, dur: 0.4, style: "pluck" });
+      if (b === 1) emit({ select: "all", offset: 0.5, dur: 0.6, style: "pluck", velMult: 0.9 });
+    },
+  },
+
+  // --- Fingerpicking ------------------------------------------------------
+  travis: {
+    label: "Travis picking (polegar+dedos)",
+    category: "finger",
+    exec(ctx, emit) {
+      const b = beatInBar4(ctx.absBeat);
+      // Polegar (baixo) em todas as batidas.
+      emit({ select: "root", offset: 0, dur: 0.9, style: "pluck" });
+      // Dedos em off-beats alternando 3ª e 5ª.
+      const upperSeq = [1, 2, 1, 2]; // 3rd, 5th, 3rd, 5th
+      emit({ select: upperSeq[b], offset: 0.5, dur: 0.45, style: "pluck", velMult: 0.85 });
+    },
+  },
+  travis_fast: {
+    label: "Travis rápido (2 dedos + polegar)",
+    category: "finger",
+    exec(ctx, emit) {
+      emit({ select: "root", offset: 0, dur: 0.3, style: "pluck" });
+      emit({ select: 2, offset: 0.25, dur: 0.25, style: "pluck", velMult: 0.85 });
+      emit({ select: 1, offset: 0.5, dur: 0.25, style: "pluck", velMult: 0.85 });
+      emit({ select: 2, offset: 0.75, dur: 0.25, style: "pluck", velMult: 0.8 });
+    },
+  },
+};
 
 function refreshSampleExecutionLoop() {
   stopSampleExecutionLoop();
@@ -955,22 +1294,22 @@ function refreshSampleExecutionLoop() {
       const harmVol = Number(document.getElementById("harmVol").value) / 100;
       const peak = Math.max(0.04, Math.min(0.16, harmVol * 0.14));
       const harmonyStyle = document.getElementById("harmonyStyle")?.value || "sustain";
-      if (harmonyStyle === "arpeggio" && harmMidis.length) {
-        const idx = sampleHarmonyArpIndex % harmMidis.length;
-        sampleHarmonyArpIndex += 1;
-        audio.instrumentSampler.playNoteAt(audio.harmStabBus, harmMidis[idx], t, peak, 0.34, "arpeggio");
-      } else if (harmonyStyle === "arpeggio_full" && harmMidis.length) {
-        const gap = Math.max(0.016, Math.min(beat / (harmMidis.length + 1), 0.09));
-        const noteDur = Math.min(0.34, gap * 2.8);
-        harmMidis.forEach((m, i) => {
-          audio.instrumentSampler.playNoteAt(audio.harmStabBus, m, t + i * gap, peak, noteDur, "arpeggio");
-        });
-      } else {
-        const dur = harmonyStyle === "pluck" ? 0.34 : 1.0;
-        harmMidis.forEach((m) => {
-          audio.instrumentSampler.playNoteAt(audio.harmStabBus, m, t, peak, dur, harmonyStyle);
-        });
-      }
+      const absBeat = sampleHarmonyBeatIndex;
+      executeHarmonyPattern({
+        styleKey: harmonyStyle,
+        chord: harmMidis,
+        beat,
+        absBeat,
+        peak,
+        schedule: ({ midi, offset, dur, style, velMult }) => {
+          const p = Math.max(0.012, Math.min(0.22, peak * (velMult ?? 1)));
+          audio.instrumentSampler.playNoteAt(audio.harmStabBus, midi, t + offset, p, dur, style);
+        },
+      });
+      // Mantém compatibilidade com o antigo contador de "arpeggio": alguns
+      // pontos do UI ainda podem lê-lo, e é barato atualizar.
+      if (harmonyStyle === "arpeggio") sampleHarmonyArpIndex += 1;
+      sampleHarmonyBeatIndex += 1;
     }
 
     // Linha de baixo (pode usar harmonia ou só I se «harmonia desligada»)
@@ -1532,22 +1871,41 @@ function syncAudio() {
       const t = audio.ctx.currentTime + 0.04;
       audio.harmStabBus.gain.cancelScheduledValues(t);
       audio.harmStabBus.gain.setValueAtTime(0.58, t);
-      const st = style === "arpeggio" ? 0.06 : 0;
-      if (style === "arpeggio") {
-        // Stab em arpejo real: ciclo curto pelas notas do acorde.
-        harmMidis.forEach((m, i) => {
-          audio.instrumentSampler.playNoteAt(audio.harmStabBus, m, t + i * st, 0.1, 0.26, "arpeggio");
-        });
-      } else if (style === "arpeggio_full") {
-        const gap = 0.055;
-        harmMidis.forEach((m, i) => {
-          audio.instrumentSampler.playNoteAt(audio.harmStabBus, m, t + i * gap, 0.1, 0.26, "arpeggio");
-        });
-      } else {
-        harmMidis.forEach((m) => {
-          audio.instrumentSampler.playNoteAt(audio.harmStabBus, m, t, 0.095, style === "pluck" ? 0.28 : 0.45, style);
-        });
-      }
+      // Stab one-shot: usa o mesmo dispatcher para coerência visual/auditiva
+      // entre "ao carregar" e "no loop". Cai para um acorde curto em estilos
+      // de batida/compasso-based que não fazem sentido como stab único.
+      const loopish = new Set([
+        "block_whole",
+        "block_half",
+        "chord_pulse_4",
+        "chord_pulse_8",
+        "strum_ballad",
+        "strum_rock_8",
+        "strum_bossa",
+        "strum_samba",
+        "strum_reggae",
+        "strum_charleston",
+        "travis",
+        "travis_fast",
+      ]);
+      const stabStyle = loopish.has(style) ? "pluck" : style;
+      executeHarmonyPattern({
+        styleKey: stabStyle,
+        chord: harmMidis,
+        beat: 0.26,
+        absBeat: 0,
+        peak: 0.1,
+        schedule: ({ midi, offset, dur, style: st, velMult }) => {
+          audio.instrumentSampler.playNoteAt(
+            audio.harmStabBus,
+            midi,
+            t + offset,
+            0.1 * (velMult ?? 1),
+            Math.min(0.4, dur),
+            st
+          );
+        },
+      });
     }
   }
 }
