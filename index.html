@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="color-scheme" content="dark light" />
   <meta name="theme-color" content="#0f1114" />
   <meta name="description" content="Harmonic Lab — Laboratório interativo de escalas, intervalos, harmonia e ritmos. 8 slots manuais, linha de baixo, sequenciador de escala com loop e bancos de amostras instrumentais (Web Audio)." />
@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+<div id="app-shell">
   <header class="top">
     <div class="brand">
       <h1>Harmonic Lab</h1>
@@ -513,6 +514,7 @@
       <strong>Banco</strong>: <code>samples/bank/</code> (piano, rhodes, cello, contrabaixo, jazz bass, guitarras, clarinete, flauta…) — ver <code>samples/bank/LEIA-ME.txt</code>. Correr <code>npm run fetch-samples</code> na pasta do projeto descarrega os WAV. O app opera em modo <strong>Instrumento</strong>; drone, harmonia, slots e escalas usam amostras.
     </p>
   </footer>
+</div>
 
   <script src="sound-bank.js"></script>
   <script src="instrument-samples.js"></script>

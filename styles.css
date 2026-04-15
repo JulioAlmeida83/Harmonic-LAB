@@ -35,12 +35,32 @@ select option:checked {
   box-sizing: border-box;
 }
 
+html,
 body {
+  height: 100%;
   margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
   font-family: var(--font);
   background: var(--bg);
   color: var(--text);
   line-height: 1.45;
+  /* iOS Safari: impede o body de rolar quando o wrapper atinge o limite
+     e evita que a URL-bar estique/colapse com o scroll interno. */
+  position: fixed;
+  inset: 0;
+  width: 100%;
+}
+
+#app-shell {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 h1 {
