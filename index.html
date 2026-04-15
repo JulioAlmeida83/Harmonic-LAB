@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="color-scheme" content="dark light" />
   <meta name="theme-color" content="#0f1114" />
   <meta name="description" content="Harmonic Lab — Laboratório interativo de escalas, intervalos, harmonia e ritmos. 8 slots manuais, linha de baixo, sequenciador de escala com loop e bancos de amostras instrumentais (Web Audio)." />
@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+<div id="app-shell">
   <header class="top">
     <div class="brand">
       <h1>Harmonic Lab</h1>
@@ -30,6 +31,13 @@
         title="Ligar/desligar o motor de áudio (atalho: Espaço)"
         aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
       >Ativar áudio</button>
+      <button
+        type="button"
+        id="btnExport"
+        class="btn"
+        title="Gravar e exportar o áudio actual em MP3"
+        aria-label="Abrir diálogo de exportação MP3"
+      >Exportar MP3</button>
     </div>
   </header>
 
@@ -244,6 +252,16 @@
     <fieldset class="subgroup subgroup-bass">
       <legend>Linha de baixo</legend>
       <div class="row">
+        <label class="field">
+          <span>Instrumento do baixo</span>
+          <select
+            id="bassBankInstrument"
+            disabled
+            title="Banco de amostras usado para a linha de baixo (independente do instrumento principal)"
+          >
+            <option value="match" selected>Igual ao principal</option>
+          </select>
+        </label>
         <label class="field">
           <span>Padrão de baixo</span>
           <select id="harmonyBassMode" title="Padrão rítmico grave derivado da harmonia base (por tempo / BPM)">
@@ -513,7 +531,51 @@
       <strong>Banco</strong>: <code>samples/bank/</code> (piano, rhodes, cello, contrabaixo, jazz bass, guitarras, clarinete, flauta…) — ver <code>samples/bank/LEIA-ME.txt</code>. Correr <code>npm run fetch-samples</code> na pasta do projeto descarrega os WAV. O app opera em modo <strong>Instrumento</strong>; drone, harmonia, slots e escalas usam amostras.
     </p>
   </footer>
+</div>
 
+  <dialog id="exportDialog" class="export-dialog" aria-labelledby="exportDialogTitle">
+    <form method="dialog" class="export-form">
+      <h2 id="exportDialogTitle">Exportar MP3</h2>
+      <p class="export-hint">
+        Grava o áudio ao vivo do motor para MP3. Em "Render", o app toca N ciclos da progressão automaticamente; em "Live", tu controlas quando começa e acaba.
+      </p>
+
+      <div class="export-modes" role="radiogroup" aria-label="Modo de exportação">
+        <label class="export-mode">
+          <input type="radio" name="exportMode" value="render" checked />
+          <span>Render (N ciclos da progressão)</span>
+        </label>
+        <label class="export-mode">
+          <input type="radio" name="exportMode" value="live" />
+          <span>Live (rec / stop manual)</span>
+        </label>
+      </div>
+
+      <div class="export-options">
+        <label class="field field-compact" data-mode="render">
+          <span>Ciclos</span>
+          <input type="number" id="exportCycles" min="1" max="16" step="1" value="2" />
+        </label>
+        <label class="field field-compact">
+          <span>Bitrate</span>
+          <select id="exportBitrate">
+            <option value="128">128 kbps</option>
+            <option value="192" selected>192 kbps</option>
+            <option value="320">320 kbps</option>
+          </select>
+        </label>
+      </div>
+
+      <p class="export-status" id="exportStatus" role="status" aria-live="polite">Pronto.</p>
+
+      <div class="export-actions">
+        <button type="button" id="btnExportClose" class="btn">Fechar</button>
+        <button type="button" id="btnExportGo" class="btn btn-primary">Começar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
   <script src="sound-bank.js"></script>
   <script src="instrument-samples.js"></script>
   <script src="chord-normalizer.js"></script>
