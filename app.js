@@ -462,6 +462,62 @@ class AudioEngine {
     }
   }
 
+  /**
+   * "Unlock" do AudioContext em iOS Safari + Android Chrome.
+   *
+   * Em iOS, criar o AudioContext num gesto não basta: o output só passa a
+   * mexer depois de tocar pelo menos um buffer através do `destination`. Sem
+   * isto o `state` aparece como "running" mas os altifalantes ficam mudos.
+   * Tocamos um buffer silencioso de 1 sample como "primer".
+   *
+   * Adicionalmente: em iOS o switch de silêncio do telemóvel mute-a o
+   * WebAudio por defeito (o áudio é tratado como "ringer", não como "media").
+   * Anexamos um <audio> com um WAV silencioso em loop e tentamos `play()` —
+   * isso obriga o iOS a tratar a app como reprodução de media e bypassa o
+   * switch de silêncio. Se falhar (ex.: política do browser), continuamos
+   * — pelo menos no modo "ringer ligado" haverá som.
+   *
+   * Deve ser chamado SEMPRE dentro do mesmo turn de gesto que iniciou o
+   * `ensure()` — caso contrário iOS rejeita.
+   */
+  async unlockOnGesture() {
+    if (!this.ctx) return;
+    try {
+      if (this.ctx.state !== "running") await this.ctx.resume();
+    } catch (_) { /* ignore */ }
+    // Primer silencioso (1 sample) — barato e suficiente para destrancar o
+    // pipeline de áudio do iOS. Idempotente: chamadas repetidas não fazem mal.
+    try {
+      const buf = this.ctx.createBuffer(1, 1, 22050);
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(this.ctx.destination);
+      src.start(0);
+      src.stop(this.ctx.currentTime + 0.001);
+    } catch (_) { /* defensivo */ }
+    // HTMLAudioElement com WAV silencioso em loop — bypassa o switch de
+    // silêncio do iPhone ao forçar o iOS a categorizar a página como
+    // "media playback". Criado uma única vez.
+    if (!this._silenceKeepAlive) {
+      try {
+        const a = new Audio();
+        a.loop = true;
+        a.muted = false;
+        a.volume = 0.0001; // praticamente inaudível mesmo se o trick falhar
+        a.setAttribute("playsinline", "");
+        a.setAttribute("webkit-playsinline", "");
+        // WAV PCM 16-bit, mono, 8 kHz, ~1s de silêncio em data URL.
+        a.src =
+          "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+        const playPromise = a.play();
+        if (playPromise && typeof playPromise.catch === "function") {
+          playPromise.catch(() => { /* ignora — sem este truque ainda funciona com ringer ligado */ });
+        }
+        this._silenceKeepAlive = a;
+      } catch (_) { /* sem Audio() — não-bloqueante */ }
+    }
+  }
+
   /** Silencia imediatamente todas as vozes (útil antes de suspend). */
   hardMute() {
     if (!this.ctx) return;
@@ -2728,8 +2784,11 @@ function wireGlobalControls() {
         alert("Não foi possível iniciar o áudio: " + (err && err.message ? err.message : err));
         return;
       }
+      // Em iOS Safari o resume + um buffer-primer + <audio> silencioso em loop
+      // são necessários para destrancar realmente o output e bypassar o switch
+      // de silêncio. Tem de correr DENTRO do gesto do utilizador (este click).
       try {
-        await audio.ctx.resume();
+        await audio.unlockOnGesture();
       } catch (_) {
         /* ignore */
       }
