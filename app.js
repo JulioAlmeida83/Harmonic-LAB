@@ -331,6 +331,10 @@ class AudioEngine {
     this.scaleSampleBus = null;
     this.harmStabBus = null;
     this.instrumentSampler = null;
+    // Sampler dedicado ao baixo. Lazy: só criado quando o user escolhe banco
+    // ≠ principal (ver ensureBassSampler/syncBassBankSamplerFromUI). Quando
+    // null, o baixo usa o instrumentSampler principal — zero overhead.
+    this.bassSampler = null;
     this._harmStabPrimed = false;
     this._harmStabKey = "";
   }
@@ -953,6 +957,37 @@ function syncBankSamplerFromUI() {
   }
 }
 
+/** Garante instância dedicada de InstrumentSampler para o baixo (lazy). */
+function ensureBassSampler() {
+  if (audio.bassSampler) return audio.bassSampler;
+  if (!audio.ctx || typeof globalThis.HLInstrumentSampler !== "function") return null;
+  audio.bassSampler = new globalThis.HLInstrumentSampler(audio.ctx);
+  return audio.bassSampler;
+}
+
+/**
+ * Sincroniza o sampler do baixo com o `#bassBankInstrument`. Se o valor for
+ * "match", o baixo usa o sampler principal — libertamos o dedicado se existia.
+ * Caso contrário, aplica o banco escolhido ao bassSampler (independente do
+ * principal) e herda o `playStyle` global.
+ */
+function syncBassBankSamplerFromUI() {
+  if (!globalThis.HLSoundBank) return;
+  const choice = document.getElementById("bassBankInstrument")?.value || "match";
+  if (choice === "match") {
+    if (audio.bassSampler) {
+      audio.bassSampler.clearCache?.();
+      audio.bassSampler = null;
+    }
+    return;
+  }
+  const s = ensureBassSampler();
+  if (!s) return;
+  globalThis.HLSoundBank.applyInstrumentToSampler(s, choice, {});
+  const style = document.getElementById("playStyle")?.value || "sustain";
+  if (typeof s.setPlaybackStyle === "function") s.setPlaybackStyle(style);
+}
+
 // Id do instrumento activo (selecionado no UI). Usado pelo normalizador de
 // acordes para escolher perfil (range/sweet/gain/character).
 function currentBankId() {
@@ -988,16 +1023,24 @@ async function preloadSamplerBank() {
     /* ignore */
   }
   syncBankSamplerFromUI();
+  syncBassBankSamplerFromUI();
   // Carrega apenas os anchors declarados no banco (NOT preloadRange(24,108)).
   // Sem isto, qualquer instrumento não-piano dispara dezenas de 404s e bloqueia
   // o await em Promise.allSettled. O sampler faz pitch-shift entre anchors via
   // nearestAnchorMidi(), logo não precisamos das 85 notas em disco.
-  const def = globalThis.HLSoundBank?.getDefinition?.(currentBankId());
-  const anchors = Array.isArray(def?.anchors) ? def.anchors : null;
-  if (anchors && anchors.length) {
-    await Promise.allSettled(anchors.map((m) => audio.instrumentSampler.loadOne(m)));
-  } else {
-    await audio.instrumentSampler.preloadRange(24, 108);
+  const loadAnchors = (sampler, id) => {
+    const def = globalThis.HLSoundBank?.getDefinition?.(id);
+    const anchors = Array.isArray(def?.anchors) ? def.anchors : null;
+    if (anchors && anchors.length) {
+      return Promise.allSettled(anchors.map((m) => sampler.loadOne(m)));
+    }
+    return sampler.preloadRange(24, 108);
+  };
+  await loadAnchors(audio.instrumentSampler, currentBankId());
+  // Se houver bassSampler dedicado, pré-carrega os anchors do seu banco.
+  const bassChoice = document.getElementById("bassBankInstrument")?.value || "match";
+  if (bassChoice !== "match" && audio.bassSampler) {
+    await loadAnchors(audio.bassSampler, bassChoice);
   }
 }
 
@@ -1803,7 +1846,10 @@ function refreshSampleExecutionLoop() {
           hStyle === "pluck"
             ? Math.max(0.14, Math.min(0.38, beat * 0.42))
             : Math.max(0.22, Math.min(0.62, beat * 0.7));
-        audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, bMidi, t + 0.006, bPeak, bDur, hStyle);
+        // Se o user escolheu banco dedicado para o baixo, usa bassSampler;
+        // caso contrário cai no sampler principal (comportamento histórico).
+        const bassSampler = audio.bassSampler || audio.instrumentSampler;
+        bassSampler.playNoteAt(audio.scaleSampleBus, bMidi, t + 0.006, bPeak, bDur, hStyle);
       }
     }
 
@@ -1869,7 +1915,7 @@ function refreshSampleExecutionLoop() {
 
 function updateSampleControlsEnabled() {
   const sm = document.getElementById("soundMode")?.value === "sample";
-  ["bankInstrument"].forEach((id) => {
+  ["bankInstrument", "bassBankInstrument"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.disabled = !sm;
   });
@@ -1901,6 +1947,21 @@ function populateSelects() {
     scaleType.appendChild(og);
   });
   scaleType.value = "major";
+
+  // Clona optgroups/options do #bankInstrument para #bassBankInstrument — mantém
+  // a lista em sincronia sem duplicar o markup. O primeiro <option value="match">
+  // permanece (definido no HTML); acrescentamos o resto por baixo.
+  const bank = document.getElementById("bankInstrument");
+  const bassBank = document.getElementById("bassBankInstrument");
+  if (bank && bassBank) {
+    Array.from(bank.children).forEach((child) => {
+      // Pula o "Som interno (síntese)" — em baixo faz pouco sentido e complica
+      // o contrato "match | instrumento real". Só clona optgroups.
+      if (child.tagName === "OPTGROUP") {
+        bassBank.appendChild(child.cloneNode(true));
+      }
+    });
+  }
 }
 
 function currentIvals() {
@@ -3009,6 +3070,18 @@ function wireGlobalControls() {
     bankInstrument.addEventListener("change", async () => {
       audio.instrumentSampler?.clearCache();
       syncBankSamplerFromUI();
+      await preloadSamplerBank();
+      scheduleSyncAudio();
+      refreshSampleExecutionLoop();
+    });
+  }
+
+  // Instrumento dedicado do baixo (independente do principal).
+  const bassBankInstrument = document.getElementById("bassBankInstrument");
+  if (bassBankInstrument) {
+    bassBankInstrument.addEventListener("change", async () => {
+      // Sem clearCache do principal — o baixo tem o seu próprio cache agora.
+      syncBassBankSamplerFromUI();
       await preloadSamplerBank();
       scheduleSyncAudio();
       refreshSampleExecutionLoop();
