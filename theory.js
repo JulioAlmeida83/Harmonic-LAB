@@ -592,6 +592,70 @@ function canonicalizeQualityToken(raw) {
   return null;
 }
 
+// --- Heurísticas partilhadas (UI ↔ parser) ---------------------------------
+// Um único ponto de verdade para classificar um token como "romano" ou
+// "acorde absoluto". As UI's (ex.: progDetectMode em app.js) e o próprio
+// parser RHS de dominantes secundárias (ver parseRomanChord abaixo) passam
+// a usar estas mesmas regex — evita divergências do tipo:
+//   - UI classifica "am7" como acorde, parser rejeita por exigir maiúscula;
+//   - UI usa prefixo "[ivIV]+" sem fechamento, parser valida tail estruturado.
+
+/**
+ * Casa um token "parece acorde absoluto" — letra A-G em MAIÚSCULA, acidente
+ * opcional, e qualquer sufixo (`m`, `7`, `maj7`, `m7b5`, …). Intencionalmente
+ * **não** aceita letras em minúscula: o `parseAbsoluteChord` também não aceita,
+ * e tolerar aqui resulta em falsos positivos que quebram no parse.
+ * Ancorado (^…$) para coerência com o resto do pipeline.
+ */
+const CHORD_ABSOLUTE_RE = /^[A-G][#b♭♯]?.*$/;
+
+/**
+ * Casa um token "parece grau romano", na forma mais geral: acidente opcional
+ * (b/#/♭/♯), numeral romano (i/ii/iii/iv/v/vi/vii em qualquer case) e sufixo
+ * livre (°, ø, 7, maj7, m7b5, …). Alinhado com o regex usado por
+ * `parseRomanChord` (que tolera qualquer tail); cobre casos "ii7", "bVII",
+ * "V7", "vii°7", "IVsus2".
+ */
+const ROMAN_LIKE_RE = /^[b#♭♯]?[ivIV]+(°|ø)?.*$/;
+
+/**
+ * Variante **estrita** de grau romano — apenas raiz (sem tail). Usada pelo
+ * parser de dominantes secundárias em `parseRomanChord` quando decide se o
+ * RHS (depois da barra) é um grau ou um slash-bass absoluto. Ancorado e sem
+ * sufixo para evitar classificar "C/E" ou "V7" como raiz romana pura.
+ */
+const ROMAN_ROOT_ONLY_RE = /^[b#♭♯]?[ivIV]+(°|ø)?$/;
+
+/** Helper público: parece um grau romano? (aceita sufixo) */
+function isRomanLike(s) {
+  return typeof s === "string" && ROMAN_LIKE_RE.test(s.trim());
+}
+
+/** Helper público: parece um acorde absoluto? (exige letra maiúscula) */
+function isAbsoluteChordLike(s) {
+  return typeof s === "string" && CHORD_ABSOLUTE_RE.test(s.trim());
+}
+
+/** Helper público: parece raiz romana pura (sem sufixo)? */
+function isRomanRootOnly(s) {
+  return typeof s === "string" && ROMAN_ROOT_ONLY_RE.test(s.trim());
+}
+
+/**
+ * Classifica um token de sequência como `"roman"` ou `"chord"`. Se ambos
+ * parecerem válidos (ex.: `"I"` é romano, `"A"` é acorde), o romano tem
+ * precedência — corresponde ao comportamento histórico do editor e é o uso
+ * mais comum em sequências funcionais. Strings vazias caem em `"roman"` por
+ * compat (o caller filtra antes de chamar o parser).
+ */
+function classifyProgressionToken(s) {
+  const t = (s || "").trim();
+  if (!t) return "roman";
+  if (isRomanLike(t)) return "roman";
+  if (isAbsoluteChordLike(t)) return "chord";
+  return "roman";
+}
+
 /**
  * Parse de acorde absoluto: "Cmaj7" → { rootPc, intervals, quality, label }.
  * Suporta grafias: `C`, `Cm`, `C7`, `Cmaj7`, `Cm7`, `C#m7b5`, `Bbdim7`, `D♭Δ7`.
@@ -645,7 +709,7 @@ function parseRomanChord(str, tonicPc = 0, scaleKey = "major") {
     // Só ativamos o modo "dominante secundária" se o RHS parece ser um grau
     // romano (ex.: "V", "ii", "bVI"), não um slash-bass absoluto ("C/E") que é
     // uma notação diferente não suportada aqui.
-    if (/^[b#♭♯]?[ivIV]+(°|ø)?$/.test(rhs)) {
+    if (isRomanRootOnly(rhs)) {
       const target = parseRomanChord(rhs, tonicPc, scaleKey);
       // Tónica "local" = raiz do alvo. Para dominantes secundárias o contexto
       // é maior (escala default "major"), mas se o lhs não é um grau de
@@ -657,10 +721,20 @@ function parseRomanChord(str, tonicPc = 0, scaleKey = "major") {
   const m = s.match(/^([b#♭♯]?)([ivIV]+)(°|ø)?(.*)$/);
   if (!m) throw new Error(`Romano inválido: ${str}`);
   const [, accRaw, romanRaw, diminutive, tailRaw] = m;
+  // Rejeitar case misto: "iV" ou "Vii" são digitação inválida — antes
+  // passavam silenciosamente ("iV" lia como IV porque só o primeiro char
+  // decidia a qualidade) e acabavam a produzir o acorde "errado" sem o
+  // utilizador perceber. Agora exigimos romano uniformemente maiúsculo
+  // (maior default) ou minúsculo (menor default).
+  const allUpper = romanRaw === romanRaw.toUpperCase();
+  const allLower = romanRaw === romanRaw.toLowerCase();
+  if (!allUpper && !allLower) {
+    throw new Error(`Romano com case misto não aceite: "${romanRaw}" em "${str}"`);
+  }
   const upper = romanRaw.toUpperCase();
   const degree = ROMAN_NUMERALS_MAP[upper];
   if (!degree) throw new Error(`Romano inválido: ${str}`);
-  const isMinorRoman = romanRaw[0] === romanRaw[0].toLowerCase();
+  const isMinorRoman = allLower;
   const acc = normalizeAccidental(accRaw);
   const scale = SCALE_TYPES[scaleKey] || SCALE_TYPES.major;
   let rootOffset = scale.intervals[degree - 1];
@@ -1987,6 +2061,11 @@ function stepAtBar(resolvedSteps, barIndex) {
   CHORD_QUALITIES,
   parseAbsoluteChord,
   parseRomanChord,
+  // Heurísticas partilhadas UI ↔ parser
+  isRomanLike,
+  isAbsoluteChordLike,
+  isRomanRootOnly,
+  classifyProgressionToken,
   chordPitchClasses,
   chordMidisAbsolute,
   // Auto-escala

@@ -661,12 +661,21 @@ class AudioEngine {
     }
   }
 
-  /** @param {{ freqs: number[], times: number[], durs: number[], gain: number, mode?: string, midis?: number[], sampler?: object }} opts */
+  /**
+   * @param {{
+   *   freqs: number[], times: number[], durs: number[], gain: number,
+   *   mode?: string, midis?: number[], sampler?: object,
+   *   t0?: number,       // tempo absoluto de arranque; se omitido, usa currentTime + 0.06
+   *   latch?: boolean,   // se true, alinha o arranque ao próximo beat global (requer bpm)
+   *   bpm?: number,      // BPM para cálculo do próximo beat quando latch=true
+   * }} opts
+   * @returns {Promise<number>} t0 absoluto efectivamente usado para agendar
+   */
   async playScaleSequence(opts) {
-    const { freqs, times, durs, gain, mode, midis, sampler } = opts;
+    const { freqs, times, durs, gain, mode, midis, sampler, latch, bpm } = opts;
     const isSample = mode === "sample" && sampler && Array.isArray(midis) && midis.length === freqs.length;
     this.stopScale({ muteSampleBus: !isSample });
-    if (!this.ctx) return;
+    if (!this.ctx) return 0;
     try {
       await this.ctx.resume();
     } catch (_) {
@@ -674,7 +683,18 @@ class AudioEngine {
     }
     const gLin = Number(gain);
     const g0 = Number.isFinite(gLin) ? gLin : 0.32;
-    const t0 = this.ctx.currentTime + 0.06;
+    // Base: margem de 60 ms para dar tempo ao agendamento. Se o chamador
+    // forneceu `t0` já alinhado, usamos esse em vez de recalcular.
+    let t0 = Number.isFinite(opts.t0) ? opts.t0 : this.ctx.currentTime + 0.06;
+    // "Encaixe no próximo tempo": avança t0 até ao próximo múltiplo de `beat`
+    // no relógio global (o relógio do AudioContext). Só se aplica se o chamador
+    // não forneceu um `t0` explícito (para não sobrepor decisões do caller).
+    if (latch && bpm > 0 && !Number.isFinite(opts.t0)) {
+      const beatSec = 60 / bpm;
+      // Math.ceil garante "próximo" beat mesmo quando já estamos numa fronteira
+      // exacta (evita colisão com a batida actual em curso).
+      t0 = Math.ceil(t0 / beatSec) * beatSec;
+    }
 
     if (this.scaleSampleBus) {
       if (isSample) {
@@ -700,6 +720,7 @@ class AudioEngine {
     this.seqTimer = setTimeout(() => {
       this.seqTimer = null;
     }, Math.max(0, (end - this.ctx.currentTime) * 1000));
+    return t0;
   }
 }
 
@@ -740,7 +761,14 @@ function buildScaleDegrees(ivals, dir, octaves) {
  * um ciclo cromático fixo com articulações longas/curtas/silêncios — aqui geramos
  * apenas as notas que SOAM (descartando os silêncios) e avançamos `t` pela duração
  * do passo (incluindo silêncios) para manter a distribuição temporal do padrão.
+ *
+ * NOTA: o alinhamento "encaixe no próximo tempo" (seqLatch) NÃO é tratado aqui —
+ * os tempos devolvidos são sempre relativos a `t=0` (início do padrão). Quem
+ * agenda a sequência é que decide o `t0` absoluto, e pode alinhá-lo ao próximo
+ * beat do relógio global (ver `playScaleSequence` + caller em `runScaleOnce`).
+ * O parâmetro `latchToBeat` é mantido por compatibilidade de API, mas ignorado.
  */
+// eslint-disable-next-line no-unused-vars
 function rhythmPattern(type, bpm, noteCount, latchToBeat) {
   const beat = 60 / bpm;
   const eighth = beat / 2;
@@ -872,11 +900,9 @@ function rhythmPattern(type, bpm, noteCount, latchToBeat) {
     pushSteps(noteCount, eighth, eighth * 0.88);
   }
 
-  if (latchToBeat) {
-    const cycle = beat * 4;
-    const pad = (cycle - (t % cycle)) % cycle;
-    for (let i = 0; i < times.length; i += 1) times[i] += pad;
-  }
+  // `latchToBeat` era aplicado aqui, mas alinhava o FINAL do padrão a um múltiplo
+  // de `cycle` relativo ao tempo interno (t=0), não ao relógio global — sem efeito
+  // prático. O alinhamento agora é feito em `playScaleSequence` através do `t0`.
 
   return { times, durs, total: t };
 }
@@ -2317,17 +2343,25 @@ const PROG_AUTO_SCALE_CANDIDATES = [
 
 /**
  * Detecta se `val` parece um grau romano (ex.: "ii7", "bVII", "V7/V") ou um
- * acorde absoluto (ex.: "Cm7", "F#m7b5"). Heurística simples baseada no
- * primeiro caractere relevante — suficiente para o uso actual em que a
- * segunda parte é sempre uma qualidade válida.
+ * acorde absoluto (ex.: "Cm7", "F#m7b5"). Agora delega a `HLTheory.classifyProgressionToken`
+ * — um único ponto de verdade partilhado com `parseAbsoluteChord`/`parseRomanChord`.
+ *
+ * IMPORTANTE: a versão antiga aceitava `[A-Ga-g]` para acorde absoluto, mas o
+ * parser só aceita `[A-G]` maiúsculo — "am7" era classificado como acorde e
+ * depois estourava no parse. A classificação agora é simétrica com o parser.
+ * Para os casos onde a letra romana ("i") e a letra de acorde ("I" é romano,
+ * "A" é acorde) colidem, romano tem precedência — comportamento histórico.
  */
 function progDetectMode(val) {
+  const helper = globalThis.HLTheory && typeof globalThis.HLTheory.classifyProgressionToken === "function"
+    ? globalThis.HLTheory.classifyProgressionToken
+    : null;
+  if (helper) return helper(val);
+  // Fallback defensivo (caso HLTheory ainda não esteja carregado — p.ex. testes).
   const s = (val || "").trim();
   if (!s) return "roman";
-  // Romanos começam (opc.) por acidente e por i/v/I/V.
-  if (/^[b#♭♯]?[ivIV]+/.test(s)) return "roman";
-  // Absolutos começam em A..G (qualquer case para B♭ → tipicamente maiúsculo).
-  if (/^[A-Ga-g]/.test(s)) return "chord";
+  if (/^[b#♭♯]?[ivIV]+(°|ø)?.*$/.test(s)) return "roman";
+  if (/^[A-G][#b♭♯]?.*$/.test(s)) return "chord";
   return "roman";
 }
 
@@ -2338,7 +2372,10 @@ function progReadSteps() {
   const rows = editor.querySelectorAll(".prog-step");
   const out = [];
   rows.forEach((row) => {
-    const val = row.querySelector('input[data-field="value"]')?.value.trim() || "";
+    // `?.value.trim()` é perigoso: se o querySelector devolver null, `?.value`
+    // é undefined e `.trim()` lança TypeError. Defende-se com default antes
+    // do trim — DOM parcial (ex.: render em curso) passa a não quebrar.
+    const val = (row.querySelector('input[data-field="value"]')?.value ?? "").trim();
     const bars = Math.max(1, Math.floor(Number(row.querySelector('input[data-field="bars"]')?.value) || 1));
     const scaleKey = row.querySelector('select[data-field="scale"]')?.value || "";
     if (!val) return;
@@ -3092,9 +3129,15 @@ function wireGlobalControls() {
     if (myToken !== scaleLoopToken) return;
 
     // Agenda highlights visuais alinhados com o início/fim de cada nota da sequência.
-    // O engine usa `t0 = ctx.currentTime + 0.06` ao iniciar — replicamos aqui.
+    // Calcula `t0Ui` usando a mesma regra que o engine: base = currentTime + 0.06;
+    // se `latch` estiver activo, avança até ao próximo beat global (mesma fórmula
+    // do `playScaleSequence`) — assim as luzes e o som atacam no mesmo instante.
     const ctxNow = audio.ctx?.currentTime ?? 0;
-    const t0Ui = ctxNow + 0.06;
+    let t0Ui = ctxNow + 0.06;
+    if (latch && bpm > 0) {
+      const beatSec = 60 / bpm;
+      t0Ui = Math.ceil(t0Ui / beatSec) * beatSec;
+    }
     const strip = document.getElementById("degreeStrip");
     if (strip) {
       for (let i = 0; i < degs.length; i += 1) {
@@ -3118,7 +3161,9 @@ function wireGlobalControls() {
       }
     }
 
-    await audio.playScaleSequence({ freqs, times, durs, gain: 0.32, mode, midis, sampler });
+    // Passamos o t0 já calculado (com latch aplicado): garante que as luzes
+    // e as notas arrancam no mesmo instante absoluto.
+    await audio.playScaleSequence({ freqs, times, durs, gain: 0.32, mode, midis, sampler, t0: t0Ui });
 
     if (!loopOn || myToken !== scaleLoopToken) return;
     const beat = 60 / bpm;
@@ -3128,7 +3173,6 @@ function wireGlobalControls() {
     const playDuration = Math.max(total, lastStart + lastDur);
     const waitS = playDuration + Math.max(0, loopGap) * beat + 0.08;
     clearTimeout(scaleLoopTimer);
-    const nextIteration = iteration + 1;
     scaleLoopTimer = setTimeout(() => {
       if (myToken !== scaleLoopToken) return;
       void runScaleOnce(myToken, nextIteration);

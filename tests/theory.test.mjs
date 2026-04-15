@@ -58,6 +58,11 @@ const {
   parseRomanChord,
   chordPitchClasses,
   chordMidisAbsolute,
+  // Heurísticas partilhadas UI ↔ parser
+  isRomanLike,
+  isAbsoluteChordLike,
+  isRomanRootOnly,
+  classifyProgressionToken,
   // Auto-escala
   pickParentScaleForChord,
   // Sequências
@@ -619,6 +624,18 @@ describe("parseRomanChord — romanos em contexto diatônico", () => {
     assert.throws(() => parseRomanChord("xyz", 0, "major"));
   });
 
+  test("rejeita case misto (iV, Vii, iIi) em vez de 'corrigir' silenciosamente", () => {
+    // Antes estas entradas passavam porque o parser só olhava o primeiro
+    // caractere para decidir maior/menor — "iV" virava IV (F em C) sem erro,
+    // mesmo sendo digitação inválida. Agora exigimos case uniforme.
+    assert.throws(() => parseRomanChord("iV", 0, "major"), /case misto/);
+    assert.throws(() => parseRomanChord("Vii", 0, "major"), /case misto/);
+    assert.throws(() => parseRomanChord("iIi", 0, "major"), /case misto/);
+    // "V" (todo maiúsculo) e "iv" (todo minúsculo) continuam válidos.
+    assert.doesNotThrow(() => parseRomanChord("V", 0, "major"));
+    assert.doesNotThrow(() => parseRomanChord("iv", 0, "major"));
+  });
+
   test("dominante secundária V7/V em C → D7", () => {
     const c = parseRomanChord("V7/V", 0, "major");
     // V de C = G (pc 7). V7 de G → D7 (raiz D = pc 2, dominant 7).
@@ -645,6 +662,63 @@ describe("parseRomanChord — romanos em contexto diatônico", () => {
     // IV de C = F (pc 5). V7 de F → C7 (raiz C = pc 0, dominant 7).
     assert.equal(c.rootPc, 0);
     assert.deepEqual(c.intervals, [0, 4, 7, 10]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("heurísticas de classificação UI ↔ parser", () => {
+  test("isAbsoluteChordLike: só aceita letra maiúscula (simétrico com parseAbsoluteChord)", () => {
+    // Aceita
+    assert.equal(isAbsoluteChordLike("C"), true);
+    assert.equal(isAbsoluteChordLike("Cm7"), true);
+    assert.equal(isAbsoluteChordLike("F#m7b5"), true);
+    assert.equal(isAbsoluteChordLike("B♭Δ7"), true);
+    // Rejeita — antes era o bug: UI dizia "chord" e o parser explodia.
+    assert.equal(isAbsoluteChordLike("am7"), false);
+    assert.equal(isAbsoluteChordLike("cmaj7"), false);
+    assert.equal(isAbsoluteChordLike(""), false);
+    assert.equal(isAbsoluteChordLike("H7"), false);
+  });
+
+  test("isRomanLike: aceita tail (7, maj7, ø) e é ancorado", () => {
+    assert.equal(isRomanLike("i"), true);
+    assert.equal(isRomanLike("ii7"), true);
+    assert.equal(isRomanLike("bVII"), true);
+    assert.equal(isRomanLike("V7"), true);
+    assert.equal(isRomanLike("vii°7"), true);
+    assert.equal(isRomanLike("iiø"), true);
+    // Rejeita coisas que obviamente não são romanos.
+    assert.equal(isRomanLike("Cm7"), false);
+    assert.equal(isRomanLike("7"), false);
+  });
+
+  test("isRomanRootOnly: estrita — sem sufixo (para split de dominantes secundárias)", () => {
+    assert.equal(isRomanRootOnly("V"), true);
+    assert.equal(isRomanRootOnly("ii"), true);
+    assert.equal(isRomanRootOnly("bVI"), true);
+    assert.equal(isRomanRootOnly("vii°"), true);
+    // V7 tem tail → não é raiz pura.
+    assert.equal(isRomanRootOnly("V7"), false);
+    assert.equal(isRomanRootOnly("iimaj7"), false);
+  });
+
+  test("classifyProgressionToken: romano tem precedência sobre acorde em ambiguidade", () => {
+    // "I" é romano (1º grau), não acorde I (=letra inexistente mas formalmente casa A-G não)
+    assert.equal(classifyProgressionToken("I"), "roman");
+    assert.equal(classifyProgressionToken("V"), "roman");
+    assert.equal(classifyProgressionToken("ii7"), "roman");
+    assert.equal(classifyProgressionToken("bVII"), "roman");
+    // Minúsculas A-G: "am7" é roman-like (a=ii) ou absolute? O fallback para chord exige
+    // maiúscula, e como "am" não é romano válido, retorna "roman" (o caller depois rejeita).
+    // O ponto principal é NÃO devolver "chord" para "am7".
+    assert.notEqual(classifyProgressionToken("am7"), "chord");
+    // Acordes maiúsculos reais.
+    assert.equal(classifyProgressionToken("Cm7"), "chord");
+    assert.equal(classifyProgressionToken("F#m7b5"), "chord");
+    // Default para vazio.
+    assert.equal(classifyProgressionToken(""), "roman");
+    assert.equal(classifyProgressionToken(null), "roman");
   });
 });
 
