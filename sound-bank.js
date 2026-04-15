@@ -102,6 +102,13 @@
       // caso contrário o fallback cai em 404 e o acorde perde notas.
       anchors: [30, 31, 34, 36, 38, 40, 42, 44, 45, 49, 52, 56, 59],
     },
+    jazz_upright_bass: {
+      label: "Contrabaixo jazz (pizzicato)",
+      pattern: "samples/bank/jazz_upright_bass/{midi}.wav",
+      fallbackKind: "jazz_upright_bass",
+      // Anchors do pack dsmolken (npm run fetch-iowa-mis).
+      anchors: [24, 27, 31, 34, 38, 41, 45, 48, 52, 55, 57],
+    },
     jazz_bass: {
       label: "Baixo elétrico (Jazz / precisão)",
       pattern: "samples/bank/jazz_bass/{midi}.wav",

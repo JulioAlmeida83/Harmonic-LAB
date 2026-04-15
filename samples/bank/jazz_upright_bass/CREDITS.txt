@@ -1,0 +1,16 @@
+Créditos — contrabaixo pizzicato (dsmolken)
+============================================
+
+Fonte:
+  D. Smolken — 1958 Otto Rubner double bass
+  Repositório: https://github.com/sfzinstruments/dsmolken.double-bass
+  Licença: royalty-free, uso comercial permitido (ver LICENSE do repo).
+
+Articulação:
+  Pizzicato, dynamic "forte" (f), round robin "a" (uma amostra por nota).
+  Formato original WAV (sem conversão aqui).
+
+Mapeamento:
+  pizz_[note][octave]_fa.wav → {midi}.wav (scientific pitch: C4 = 60).
+
+Gerado por: npm run fetch-iowa-mis

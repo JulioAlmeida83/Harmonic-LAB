@@ -4,6 +4,7 @@
   "description": "Harmonic Lab — intervalos, escalas, amostras",
   "scripts": {
     "fetch-samples": "node scripts/download-bank.mjs",
+    "fetch-iowa-mis": "node scripts/fetch-iowa-mis.mjs",
     "serve": "npx --yes serve . -l 3000",
     "start": "npx --yes serve . -l 3000",
     "test": "node --test tests/*.test.mjs"
