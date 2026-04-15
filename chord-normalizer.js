@@ -66,7 +66,11 @@
     piano:            { range: [21, 108], sweet: [48, 84], gain: 1.00, character: "natural" },
     rhodes:           { range: [28, 96],  sweet: [48, 84], gain: 0.98, character: "natural" },
     cello:            { range: [36, 76],  sweet: [40, 64], gain: 1.05, character: "natural" },
-    acoustic_bass:    { range: [28, 55],  sweet: [28, 43], gain: 1.10, character: "natural" },
+    // "percussive": força envelope "pluck" (ataque rápido, cauda curta) sobre
+    // a sample — o pack tonejs-instruments/contrabass é gravado com arco, e o
+    // envelope pluck corta o sustain para imitar pizz. Não é um pizz real,
+    // mas fica muito mais próximo de walking bass jazz do que o arco bruto.
+    acoustic_bass:    { range: [28, 55],  sweet: [28, 43], gain: 1.10, character: "percussive" },
     jazz_bass:        { range: [28, 60],  sweet: [28, 48], gain: 1.08, character: "natural" },
     fender_guitar:    { range: [40, 84],  sweet: [48, 72], gain: 1.02, character: "natural" },
     guitar_distorted: { range: [40, 84],  sweet: [43, 67], gain: 0.88, character: "natural" },
