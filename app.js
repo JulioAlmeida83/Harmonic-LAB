@@ -988,7 +988,17 @@ async function preloadSamplerBank() {
     /* ignore */
   }
   syncBankSamplerFromUI();
-  await audio.instrumentSampler.preloadRange(24, 108);
+  // Carrega apenas os anchors declarados no banco (NOT preloadRange(24,108)).
+  // Sem isto, qualquer instrumento não-piano dispara dezenas de 404s e bloqueia
+  // o await em Promise.allSettled. O sampler faz pitch-shift entre anchors via
+  // nearestAnchorMidi(), logo não precisamos das 85 notas em disco.
+  const def = globalThis.HLSoundBank?.getDefinition?.(currentBankId());
+  const anchors = Array.isArray(def?.anchors) ? def.anchors : null;
+  if (anchors && anchors.length) {
+    await Promise.allSettled(anchors.map((m) => audio.instrumentSampler.loadOne(m)));
+  } else {
+    await audio.instrumentSampler.preloadRange(24, 108);
+  }
 }
 
 function stopSampleExecutionLoop() {
@@ -3197,11 +3207,16 @@ function wireGlobalControls() {
 
   document.getElementById("btnStopScale").addEventListener("click", () => {
     stopScaleLoop();
-    audio.stopScale();
-    stopSampleExecutionLoop();
-    // Em modo sample, notas já despachadas para o instrumentSampler ainda
-    // ficam no ar (decaimento natural). Cortamos para honrar o "■ Parar".
-    audio.stopSamplerVoices?.(0.03);
+    // Modo synth: silencia seqGain. Modo sample: NÃO silencia scaleSampleBus
+    // porque é partilhado com drone/slots/bass — zerá-lo calaria tudo.
+    audio.stopScale({ muteSampleBus: false });
+    // Deliberadamente NÃO chamamos:
+    //   - stopSampleExecutionLoop(): dirige harmonia/drone/slots/bass e não
+    //     tem nada a ver com o scale player; matá-lo deixava a harmonia morta
+    //     até o user mexer em instrumento/progressão/slot.
+    //   - stopSamplerVoices(): corte global apagaria vozes da harmonia em
+    //     harmStabBus. Notas de escala já despachadas decaem naturalmente
+    //     (≤0.3s em pluck, até ~1.5s em sustain) — preço aceitável.
   });
 
   // Se o utilizador desliga o loop enquanto já está a correr, cancela o reagendamento
