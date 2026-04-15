@@ -756,6 +756,72 @@ input[type="checkbox"]:focus-visible {
   font-size: 0.68rem;
 }
 
+.field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: unset;
+}
+
+.field-block > span.slot-deg-label {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+/* Barra cromática dos slots: 12 notas em grelha 3×4. */
+.slot-chroma-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.chroma-pc {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--line);
+  background: #0f1218;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 0.22rem 0.1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  min-height: 1.6rem;
+  line-height: 1;
+  transition: background 0.08s ease, color 0.08s ease, border-color 0.08s ease;
+}
+
+.chroma-pc:hover {
+  border-color: var(--accent-2, #6c9cff);
+}
+
+.chroma-pc.diatonic {
+  color: #dfe7f5;
+  background: #141a24;
+  border-color: rgba(108, 156, 255, 0.35);
+}
+
+.chroma-pc:not(.diatonic) {
+  opacity: 0.72;
+  font-style: italic;
+}
+
+.chroma-pc.selected {
+  background: rgba(108, 156, 255, 0.55);
+  color: #fff;
+  border-color: var(--accent-2, #6c9cff);
+  font-style: normal;
+  opacity: 1;
+}
+
+.chroma-pc.selected:not(.diatonic) {
+  background: rgba(255, 170, 80, 0.5);
+  border-color: rgba(255, 170, 80, 0.9);
+}
+
 .foot {
   padding: 0 1.25rem 2rem;
   color: var(--muted);
@@ -923,55 +989,4 @@ input[type="checkbox"]:focus-visible {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: color 160ms ease, border-color 160ms ease, background-color 200ms ease;
-}
-
-.prog-step.is-active .prog-step-cifra {
-  color: #fff;
-  border-color: var(--accent);
-  background: rgba(108, 156, 255, 0.25);
-}
-
-.prog-step .prog-step-label {
-  font-size: 0.7rem;
-  opacity: 0.75;
-  color: var(--muted);
-  grid-column: 1 / -1;
-  margin-bottom: -0.15rem;
-}
-
-.prog-step .prog-step-remove {
-  appearance: none;
-  border: 1px solid var(--line-strong);
-  background: #12151c;
-  color: var(--text);
-  border-radius: 4px;
-  cursor: pointer;
-  padding: 0.15rem 0.3rem;
-  font-size: 0.95rem;
-  line-height: 1;
-}
-
-.prog-step .prog-step-remove:hover {
-  background: #3a1f22;
-  border-color: #d66;
-  color: #ffb3b3;
-}
-
-.prog-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.6rem;
-  flex-wrap: wrap;
-}
-
-.prog-now {
-  font-size: 0.85rem;
-  opacity: 0.85;
-  margin-left: auto;
-}
-
-body.mode-simple .panel-progression {
-  display: none;
-}
+  transition: color 160ms ease, bor
