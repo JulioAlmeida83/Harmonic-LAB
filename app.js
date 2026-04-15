@@ -491,13 +491,21 @@ class AudioEngine {
    * Deve ser chamado SEMPRE dentro do mesmo turn de gesto que iniciou o
    * `ensure()` — caso contrário iOS rejeita.
    */
-  async unlockOnGesture() {
-    if (!this.ctx) return;
-    try {
-      if (this.ctx.state !== "running") await this.ctx.resume();
-    } catch (_) { /* ignore */ }
-    // Primer silencioso (1 sample) — barato e suficiente para destrancar o
-    // pipeline de áudio do iOS. Idempotente: chamadas repetidas não fazem mal.
+  /**
+   * Destranca o pipeline de áudio em iOS Safari.
+   *
+   * Em iOS 17/18 a "transient activation" do gesto expira no primeiro `await`.
+   * Tudo o que depende do gesto (primer via BufferSource.start, HTMLAudioElement.play
+   * para bypassar o switch de silêncio) TEM de correr SINCRONAMENTE antes de
+   * qualquer `await`. Por isso esta função NÃO é async — faz o trabalho-gesto
+   * síncrono e devolve a promise de `ctx.resume()` para o caller esperar.
+   */
+  unlockOnGesture() {
+    if (!this.ctx) return Promise.resolve();
+    // --- SÍNCRONO (ainda dentro do gesto) -----------------------------------
+    // 1) Primer silencioso: obriga o output de iOS a "arrancar". BufferSource
+    //    agendado aqui é aceite mesmo antes de resume(); dispara assim que o
+    //    contexto estiver running.
     try {
       const buf = this.ctx.createBuffer(1, 1, 22050);
       const src = this.ctx.createBufferSource();
@@ -506,27 +514,45 @@ class AudioEngine {
       src.start(0);
       src.stop(this.ctx.currentTime + 0.001);
     } catch (_) { /* defensivo */ }
-    // HTMLAudioElement com WAV silencioso em loop — bypassa o switch de
-    // silêncio do iPhone ao forçar o iOS a categorizar a página como
-    // "media playback". Criado uma única vez.
+
+    // 2) HTMLAudioElement em loop com WAV silencioso — força iOS a tratar a
+    //    página como "media playback" e bypassa o switch de silêncio do
+    //    iPhone. TEM de acontecer dentro do gesto. Criado uma única vez.
     if (!this._silenceKeepAlive) {
       try {
         const a = new Audio();
         a.loop = true;
         a.muted = false;
-        a.volume = 0.0001; // praticamente inaudível mesmo se o trick falhar
+        a.volume = 0.0001; // praticamente inaudível
         a.setAttribute("playsinline", "");
         a.setAttribute("webkit-playsinline", "");
-        // WAV PCM 16-bit, mono, 8 kHz, ~1s de silêncio em data URL.
+        a.setAttribute("preload", "auto");
+        // WAV PCM 8-bit mono 8kHz, 1 sample (0x80 = silêncio unsigned). Mais
+        // curto que o anterior mas com data-chunk válido — iOS rejeitava
+        // a versão com 0 bytes de data. Ao reproduzir em loop, cobre o ctx.
         a.src =
-          "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
-        const playPromise = a.play();
-        if (playPromise && typeof playPromise.catch === "function") {
-          playPromise.catch(() => { /* ignora — sem este truque ainda funciona com ringer ligado */ });
+          "data:audio/wav;base64,UklGRiUAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQEAAACA";
+        const p = a.play();
+        if (p && typeof p.catch === "function") {
+          p.catch(() => { /* falhou o bypass; ringer ligado continua a funcionar */ });
         }
         this._silenceKeepAlive = a;
       } catch (_) { /* sem Audio() — não-bloqueante */ }
     }
+
+    // --- ASYNC (podemos esperar depois) -------------------------------------
+    // 3) resume(): chamado de forma síncrona (devolve promise imediata), quem
+    //    nos chamou decide se aguarda. Aqui o await seria o primeiro break
+    //    do gesto — evitamos, para garantir que 1) e 2) já dispararam.
+    if (this.ctx.state !== "running") {
+      try {
+        const p = this.ctx.resume();
+        return (p && typeof p.then === "function") ? p.catch(() => {}) : Promise.resolve();
+      } catch (_) {
+        return Promise.resolve();
+      }
+    }
+    return Promise.resolve();
   }
 
   /** Silencia imediatamente todas as vozes (útil antes de suspend). */
