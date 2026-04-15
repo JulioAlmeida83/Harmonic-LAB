@@ -31,6 +31,13 @@
         title="Ligar/desligar o motor de áudio (atalho: Espaço)"
         aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
       >Ativar áudio</button>
+      <button
+        type="button"
+        id="btnExport"
+        class="btn"
+        title="Gravar e exportar o áudio actual em MP3"
+        aria-label="Abrir diálogo de exportação MP3"
+      >Exportar MP3</button>
     </div>
   </header>
 
@@ -526,6 +533,49 @@
   </footer>
 </div>
 
+  <dialog id="exportDialog" class="export-dialog" aria-labelledby="exportDialogTitle">
+    <form method="dialog" class="export-form">
+      <h2 id="exportDialogTitle">Exportar MP3</h2>
+      <p class="export-hint">
+        Grava o áudio ao vivo do motor para MP3. Em "Render", o app toca N ciclos da progressão automaticamente; em "Live", tu controlas quando começa e acaba.
+      </p>
+
+      <div class="export-modes" role="radiogroup" aria-label="Modo de exportação">
+        <label class="export-mode">
+          <input type="radio" name="exportMode" value="render" checked />
+          <span>Render (N ciclos da progressão)</span>
+        </label>
+        <label class="export-mode">
+          <input type="radio" name="exportMode" value="live" />
+          <span>Live (rec / stop manual)</span>
+        </label>
+      </div>
+
+      <div class="export-options">
+        <label class="field field-compact" data-mode="render">
+          <span>Ciclos</span>
+          <input type="number" id="exportCycles" min="1" max="16" step="1" value="2" />
+        </label>
+        <label class="field field-compact">
+          <span>Bitrate</span>
+          <select id="exportBitrate">
+            <option value="128">128 kbps</option>
+            <option value="192" selected>192 kbps</option>
+            <option value="320">320 kbps</option>
+          </select>
+        </label>
+      </div>
+
+      <p class="export-status" id="exportStatus" role="status" aria-live="polite">Pronto.</p>
+
+      <div class="export-actions">
+        <button type="button" id="btnExportClose" class="btn">Fechar</button>
+        <button type="button" id="btnExportGo" class="btn btn-primary">Começar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
   <script src="sound-bank.js"></script>
   <script src="instrument-samples.js"></script>
   <script src="chord-normalizer.js"></script>

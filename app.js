@@ -378,6 +378,13 @@ class AudioEngine {
     conv.connect(wet);
     wet.connect(this.ctx.destination);
 
+    // Tap de gravação: MediaStreamDestination recebe o mesmo sinal pós-reverb
+    // que vai ao destino. Sem efeito audível — MediaStreamDestination só emite
+    // quando um MediaRecorder/consumer subscreve o stream.
+    this.recDest = this.ctx.createMediaStreamDestination();
+    dry.connect(this.recDest);
+    wet.connect(this.recDest);
+
     /* Drone: seno suave + corte grave (menos “electrónico”) */
     this.drone.lpf = this.ctx.createBiquadFilter();
     this.drone.lpf.type = "lowpass";
@@ -1688,6 +1695,9 @@ function refreshSampleExecutionLoop() {
 
   const step = () => {
     if (!audioUserEnabled || !audio.ctx || audio.ctx.state !== "running") return;
+    // Export em modo render: verifica se já atingimos N ciclos e pára a
+    // gravação. Não trava o step — o áudio continua a correr normalmente.
+    exportCheckRenderStop();
     const tcp = currentTonicPc();
     const ivals = currentIvals();
     const baseOct = slotsPlaybackBaseOct();
@@ -1919,6 +1929,197 @@ function updateSampleControlsEnabled() {
     const el = document.getElementById(id);
     if (el) el.disabled = !sm;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Export MP3 — gravação sobre o AudioContext ao vivo, encode via lamejs.
+//
+// Dois modos:
+//   • render: user escolhe N ciclos da progressão; o app arranca a progressão,
+//     inicia a gravação, e pára ao completar N ciclos.
+//   • live: botão Começar inicia, Parar para. User controla a duração.
+//
+// Em ambos, o pipeline é: MediaStreamDestination (ligado ao dry+wet pós-limiter)
+// → MediaRecorder (WebM/Opus) → decodeAudioData → PCM 16-bit → lamejs → MP3.
+// Aceita-se o duplo-encode (Opus→MP3) como limitação v1; próxima iteração
+// usará AudioWorklet para PCM puro.
+// ---------------------------------------------------------------------------
+
+const exportState = {
+  mediaRec: null,
+  chunks: [],
+  active: false,
+  mode: "idle", // "idle" | "render" | "live"
+  renderTargetBeats: 0,
+  renderStartBeatIndex: 0,
+  startedAt: 0,
+  tickTimer: null,
+};
+
+function setExportStatus(msg, kind = "info") {
+  const el = document.getElementById("exportStatus");
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.toggle("is-recording", kind === "recording");
+  el.classList.toggle("is-done", kind === "done");
+}
+
+function floatToInt16(floats) {
+  const out = new Int16Array(floats.length);
+  for (let i = 0; i < floats.length; i += 1) {
+    const s = Math.max(-1, Math.min(1, floats[i]));
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  return out;
+}
+
+function encodeMp3FromAudioBuffer(buf, bitrate) {
+  // lamejs UMD expõe `lamejs.Mp3Encoder`.
+  const lame = globalThis.lamejs;
+  if (!lame || !lame.Mp3Encoder) {
+    throw new Error("lamejs não carregado — verifica a ligação à CDN.");
+  }
+  const channels = Math.min(2, buf.numberOfChannels);
+  const enc = new lame.Mp3Encoder(channels, buf.sampleRate, bitrate);
+  const left = floatToInt16(buf.getChannelData(0));
+  const right = channels > 1 ? floatToInt16(buf.getChannelData(1)) : left;
+  const chunks = [];
+  const frameSize = 1152;
+  for (let i = 0; i < left.length; i += frameSize) {
+    const l = left.subarray(i, i + frameSize);
+    const r = right.subarray(i, i + frameSize);
+    const out = enc.encodeBuffer(l, r);
+    if (out.length) chunks.push(out);
+  }
+  const tail = enc.flush();
+  if (tail.length) chunks.push(tail);
+  return new Blob(chunks, { type: "audio/mpeg" });
+}
+
+function triggerDownload(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function pickMediaRecorderMime() {
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "",
+  ];
+  for (const m of candidates) {
+    if (!m) return "";
+    if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return "";
+}
+
+async function startExportRecording() {
+  if (exportState.active) return;
+  if (!audio.ctx || !audio.recDest) {
+    setExportStatus("Ativa o áudio antes de exportar.", "info");
+    return;
+  }
+  if (!globalThis.lamejs?.Mp3Encoder) {
+    setExportStatus("lamejs não carregou — sem internet? Tenta de novo.", "info");
+    return;
+  }
+  try {
+    await audio.ctx.resume();
+  } catch (_) { /* ignore */ }
+  const mimeType = pickMediaRecorderMime();
+  const opts = mimeType ? { mimeType } : undefined;
+  let rec;
+  try {
+    rec = new MediaRecorder(audio.recDest.stream, opts);
+  } catch (err) {
+    setExportStatus(`MediaRecorder falhou: ${err?.message ?? err}`, "info");
+    return;
+  }
+  exportState.mediaRec = rec;
+  exportState.chunks = [];
+  exportState.active = true;
+  exportState.startedAt = Date.now();
+  rec.ondataavailable = (ev) => {
+    if (ev.data && ev.data.size > 0) exportState.chunks.push(ev.data);
+  };
+  rec.onstop = () => {
+    void finalizeExport();
+  };
+  rec.start(250); // chunk a cada 250ms para robustez
+  setExportStatus("A gravar…", "recording");
+  // Atualiza contador de tempo
+  if (exportState.tickTimer) clearInterval(exportState.tickTimer);
+  exportState.tickTimer = setInterval(() => {
+    if (!exportState.active) return;
+    const s = ((Date.now() - exportState.startedAt) / 1000).toFixed(1);
+    setExportStatus(
+      exportState.mode === "render"
+        ? `A gravar (render)… ${s}s`
+        : `A gravar (live)… ${s}s`,
+      "recording",
+    );
+  }, 200);
+}
+
+function stopExportRecording() {
+  if (!exportState.active || !exportState.mediaRec) return;
+  exportState.active = false;
+  if (exportState.tickTimer) {
+    clearInterval(exportState.tickTimer);
+    exportState.tickTimer = null;
+  }
+  try {
+    exportState.mediaRec.stop();
+  } catch (_) { /* ignore */ }
+  setExportStatus("A codificar MP3…", "info");
+}
+
+async function finalizeExport() {
+  const chunks = exportState.chunks;
+  exportState.chunks = [];
+  exportState.mediaRec = null;
+  if (!chunks.length) {
+    setExportStatus("Nada gravado — o áudio estava em silêncio?", "info");
+    return;
+  }
+  const mime = chunks[0].type || "audio/webm";
+  const blob = new Blob(chunks, { type: mime });
+  try {
+    const arrayBuf = await blob.arrayBuffer();
+    // Decodifica em ctx offline para não colidir com o ctx ao vivo
+    const offline = new OfflineAudioContext(2, 44100, 44100);
+    const decoded = await offline.decodeAudioData(arrayBuf);
+    const bitrate = Number(document.getElementById("exportBitrate")?.value || 192);
+    const mp3Blob = encodeMp3FromAudioBuffer(decoded, bitrate);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    triggerDownload(mp3Blob, `harmonic-lab-${stamp}.mp3`);
+    setExportStatus(
+      `Exportado (${(mp3Blob.size / 1024).toFixed(0)} KB, ${decoded.duration.toFixed(1)}s).`,
+      "done",
+    );
+  } catch (err) {
+    console.error("Harmonic Lab: falha no encode MP3.", err);
+    setExportStatus(`Falha ao codificar: ${err?.message ?? err}`, "info");
+  }
+}
+
+/** Invocado pelo execution loop a cada step em modo render para verificar se
+ *  já atingimos o número de beats alvo e parar a gravação. */
+function exportCheckRenderStop() {
+  if (!exportState.active || exportState.mode !== "render") return;
+  const elapsedBeats = sampleHarmonyBeatIndex - exportState.renderStartBeatIndex;
+  if (elapsedBeats >= exportState.renderTargetBeats) {
+    stopExportRecording();
+    exportState.mode = "idle";
+  }
 }
 
 function populateSelects() {
@@ -2944,6 +3145,70 @@ function wireGlobalControls() {
   }
 
   btnAudio.addEventListener("click", toggleAudio);
+
+  // Export MP3 — abre dialog; dentro, o user escolhe modo e inicia.
+  const btnExport = document.getElementById("btnExport");
+  const exportDialog = document.getElementById("exportDialog");
+  const btnExportClose = document.getElementById("btnExportClose");
+  const btnExportGo = document.getElementById("btnExportGo");
+
+  function syncExportDialogMode() {
+    const mode = exportDialog?.querySelector('input[name="exportMode"]:checked')?.value || "render";
+    exportDialog?.setAttribute("data-mode", mode);
+    if (btnExportGo) {
+      btnExportGo.textContent = exportState.active
+        ? "Parar"
+        : mode === "render"
+          ? "Render"
+          : "Rec";
+    }
+  }
+
+  if (btnExport && exportDialog && typeof exportDialog.showModal === "function") {
+    btnExport.addEventListener("click", () => {
+      if (!audioUserEnabled) {
+        setExportStatus("Ativa o áudio primeiro (botão ao lado).", "info");
+      } else {
+        setExportStatus("Pronto.", "info");
+      }
+      syncExportDialogMode();
+      exportDialog.showModal();
+    });
+    btnExportClose?.addEventListener("click", () => {
+      if (exportState.active) stopExportRecording();
+      exportDialog.close();
+    });
+    exportDialog.querySelectorAll('input[name="exportMode"]').forEach((r) => {
+      r.addEventListener("change", syncExportDialogMode);
+    });
+    btnExportGo?.addEventListener("click", async () => {
+      if (exportState.active) {
+        stopExportRecording();
+        syncExportDialogMode();
+        return;
+      }
+      const mode = exportDialog.querySelector('input[name="exportMode"]:checked')?.value || "render";
+      if (mode === "render") {
+        const cycles = Math.max(1, Math.min(16, Number(document.getElementById("exportCycles")?.value || 2)));
+        // Cada passo do execution loop avança sampleHarmonyBeatIndex em +1.
+        // "Ciclo" aqui = uma passagem pelos steps da progressão resolvida.
+        // Se não houver progressão activa, cai para "live" com duração
+        // manual — avisa o user.
+        const steps = Array.isArray(progState?.resolved) ? progState.resolved.length : 0;
+        if (!progState?.enabled || steps === 0) {
+          setExportStatus("Progressão desligada — usa modo Live ou activa uma progressão.", "info");
+          return;
+        }
+        exportState.mode = "render";
+        exportState.renderTargetBeats = cycles * steps;
+        exportState.renderStartBeatIndex = sampleHarmonyBeatIndex;
+      } else {
+        exportState.mode = "live";
+      }
+      await startExportRecording();
+      syncExportDialogMode();
+    });
+  }
 
   // Modo simples/avançado — esconde campos .is-advanced no modo simples.
   const btnMode = document.getElementById("btnMode");
