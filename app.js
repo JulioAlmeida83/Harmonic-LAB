@@ -1039,6 +1039,20 @@ function currentBankId() {
   return document.getElementById("bankInstrument")?.value || "piano";
 }
 
+/**
+ * ID do banco efectivo para o baixo. Se o user escolheu "Igual ao principal"
+ * (value = "match"), devolve `currentBankId()`; caso contrário devolve a
+ * escolha dedicada. Crítico para o ChordNormalizer — normalizar a nota do
+ * baixo com o id do piano desloca-a para o sweet spot do piano (C4–C5), não
+ * do contrabaixo (C1–C3), e aplica o `gainScale` errado (piano costuma ter
+ * gainScale < 1 no range grave, o que soa "muito ao fundo" nas amostras de
+ * contrabaixo).
+ */
+function currentBassBankId() {
+  const choice = document.getElementById("bassBankInstrument")?.value || "match";
+  return choice === "match" ? currentBankId() : choice;
+}
+
 // Aplica estilo "pluck" se o perfil do instrumento for percussivo
 // (ex.: xilofone) e o padrão pedido for sustain — caso contrário devolve
 // o estilo original. Centraliza a lógica para harmonia e baixo.
@@ -1879,7 +1893,7 @@ function refreshSampleExecutionLoop() {
         // do pack activo (ex.: contrabaixo → MIDI 28–48), aplica gainScale
         // específico e força "pluck" se o perfil for percussivo.
         const normB = globalThis.HLChordNormalizer
-          ? HLChordNormalizer.normalizeSingleNote(bMidiRaw, currentBankId())
+          ? HLChordNormalizer.normalizeSingleNote(bMidiRaw, currentBassBankId())
           : { midi: bMidiRaw, gainScale: 1, styleOverride: undefined };
         const bMidi = normB.midi;
         const bassVol = Number(document.getElementById("harmonyBassVol")?.value ?? 44) / 100;
