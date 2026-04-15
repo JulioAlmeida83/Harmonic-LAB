@@ -1895,7 +1895,7 @@ function populateSelects() {
 
 function currentIvals() {
   const key = document.getElementById("scaleType").value;
-  return SCALE_TYPES[key].intervals;
+  return SCALE_TYPES[key]?.intervals ?? SCALE_TYPES["major"].intervals;
 }
 
 function currentTonicPc() {
@@ -3097,7 +3097,8 @@ function wireGlobalControls() {
     let dir = dirRaw;
     if (dirRaw === "alt_up") dir = iteration % 2 === 0 ? "up" : "down";
     else if (dirRaw === "alt_down") dir = iteration % 2 === 0 ? "down" : "up";
-    const oct = Number(document.getElementById("seqOctaves").value) || 1;
+    const rawOct = Number(document.getElementById("seqOctaves").value);
+    const oct = Math.max(1, Math.min(4, rawOct)) || 1;
     const bpm = currentBpm();
     const rhythm = document.getElementById("seqRhythm").value;
     const latch = document.getElementById("seqLatch").checked;
@@ -3175,7 +3176,7 @@ function wireGlobalControls() {
     clearTimeout(scaleLoopTimer);
     scaleLoopTimer = setTimeout(() => {
       if (myToken !== scaleLoopToken) return;
-      void runScaleOnce(myToken, nextIteration);
+      void runScaleOnce(myToken, iteration + 1);
     }, Math.max(40, Math.round(waitS * 1000)));
   }
 
