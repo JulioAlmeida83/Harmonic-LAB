@@ -71,6 +71,9 @@
     // envelope pluck corta o sustain para imitar pizz. Não é um pizz real,
     // mas fica muito mais próximo de walking bass jazz do que o arco bruto.
     acoustic_bass:    { range: [28, 55],  sweet: [28, 43], gain: 1.10, character: "percussive" },
+    // Pack dsmolken já é pizzicato nativo — sample character "natural" mantém
+    // o envelope da gravação (ataque + decay autênticos do contrabaixo jazz).
+    jazz_upright_bass:{ range: [24, 60],  sweet: [28, 52], gain: 1.08, character: "natural" },
     jazz_bass:        { range: [28, 60],  sweet: [28, 48], gain: 1.08, character: "natural" },
     fender_guitar:    { range: [40, 84],  sweet: [48, 72], gain: 1.02, character: "natural" },
     guitar_distorted: { range: [40, 84],  sweet: [43, 67], gain: 0.88, character: "natural" },
