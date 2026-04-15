@@ -17,14 +17,26 @@
 // único. As funções abaixo preservam a API antiga para minimizar ripple no
 // resto do ficheiro.
 
-/** Sempre devolve "degree" — mantido para retro-compat de call-sites. */
+/** Sempre devolve "chromatic" — a barra dos slots é agora cromática (12 notas). */
 function currentSlotInputMode() {
-  return "degree";
+  return "chromatic";
 }
 
-/** Devolve um array [midi] com a nota do slot. Um slot = uma nota. */
+/**
+ * Resolve o MIDI absoluto de um slot. Deliberadamente independente da escala
+ * e do tónica: `s.pc` é a classe de altura cromática (0–11) escolhida pelo
+ * usuário, e `s.oct` o deslocamento relativo à oitava-base dos slots. Assim
+ * mudar a escala/tónica na UI não altera o que os slots tocam — a seleção
+ * de nota fica "congelada" no momento em que foi feita.
+ *
+ * Parâmetros `tcp` / `ivals` mantidos na assinatura por retro-compat com
+ * callers antigos (mas não são usados no cálculo).
+ */
+// eslint-disable-next-line no-unused-vars
 function chordMidisFromSlotState(s, tcp, ivals, baseOct) {
-  const rootMidi = midiForScaleDegree(tcp, ivals, s.deg, baseOct + s.oct);
+  const pc = Number.isFinite(s?.pc) ? ((s.pc % 12) + 12) % 12 : 0;
+  const oct = Number.isFinite(s?.oct) ? s.oct : 0;
+  const rootMidi = pc + 12 * (baseOct + 1) + 12 * oct;
   return [wrapMidiToRange(rootMidi)];
 }
 
@@ -2348,41 +2360,107 @@ function renderDegreeStrip() {
   }
 }
 
+/**
+ * Conjunto de pcs (0–11) diatónicos à escala actual. Usado para marcar os
+ * botões cromáticos do slot com indicação visual de pertença à escala.
+ */
+function diatonicPcSet(tcp, ivals) {
+  const out = new Set();
+  ivals.forEach((semi) => out.add(((tcp + semi) % 12 + 12) % 12));
+  return out;
+}
+
+/**
+ * Devolve o grau hepta- (1..ivals.length) correspondente ao pc, ou `null`
+ * se o pc não for diatónico à escala actual. Usado apenas para rotular o
+ * slot com o romano quando a nota escolhida é diatónica.
+ */
+function scaleDegreeForPc(pc, tcp, ivals) {
+  const n = ivals.length;
+  for (let d = 0; d < n; d += 1) {
+    if (((tcp + ivals[d]) % 12 + 12) % 12 === pc) return d + 1;
+  }
+  return null;
+}
+
+/** Rótulo do slot para a nota escolhida (nome + romano quando diatónica). */
+function formatSlotChromaticLabel(pc, tcp, ivals, preferFl) {
+  const name = pcToName(pc, preferFl);
+  const d = scaleDegreeForPc(pc, tcp, ivals);
+  if (d == null) return `${name} — fora da escala`;
+  const r = romanForExtendedDegree(ivals, d).roman;
+  return `${d}: ${r} — ${name}`;
+}
+
 function refreshSlotRow(slot) {
-  const selects = slot.querySelectorAll("select");
-  const degSel = selects[0];
-  if (!degSel) return;
   const slotI = Number(slot.dataset.index);
   const slotIdx = Number.isFinite(slotI) ? slotI : 0;
   const iv = currentIvals();
   const tcp = currentTonicPc();
   const pf = preferFlats();
-  const degLabel = slot.querySelector(".slot-deg-label");
-  if (degLabel) degLabel.textContent = "Grau";
+  const dia = diatonicPcSet(tcp, iv);
+  const pc = ((Number(slot.dataset.pc ?? 0) % 12) + 12) % 12;
+  const oct = Number(slot.dataset.oct ?? 0);
 
-  for (let di = 0; di < degSel.options.length; di += 1) {
-    degSel.options[di].textContent = formatSlotDegreeLabel(di + 1, iv, tcp, pf);
+  // Actualiza os botões da barra cromática (nomes + marcador diatónico + seleção)
+  const bar = slot.querySelector(".slot-chroma-bar");
+  if (bar) {
+    bar.querySelectorAll(".chroma-pc").forEach((btn) => {
+      const btnPc = Number(btn.dataset.pc);
+      btn.textContent = pcToName(btnPc, pf);
+      btn.classList.toggle("diatonic", dia.has(btnPc));
+      btn.classList.toggle("selected", btnPc === pc);
+      const d = scaleDegreeForPc(btnPc, tcp, iv);
+      btn.title = d != null
+        ? `Grau ${d} (${romanForExtendedDegree(iv, d).roman}) — ${pcToName(btnPc, pf)}`
+        : `Fora da escala — ${pcToName(btnPc, pf)}`;
+    });
   }
 
-  const d = Number(degSel.value);
+  // Rótulos agregados (roman, intervalo, index)
   const roman = slot.querySelector(".slot-roman");
   const inter = slot.querySelector(".slot-interval");
   const idx = slot.querySelector(".slot-index");
-  const r = romanForExtendedDegree(iv, d);
+  const d = scaleDegreeForPc(pc, tcp, iv);
+  if (roman) roman.textContent = d != null ? romanForExtendedDegree(iv, d).roman : "—";
+  if (inter) {
+    const semi = ((pc - tcp) % 12 + 12) % 12;
+    inter.textContent = intervalNameFromTonic(semi);
+  }
+  if (idx) {
+    idx.textContent = `Slot ${slotIdx + 1}\n${formatSlotChromaticLabel(pc, tcp, iv, pf)}`;
+  }
 
-  if (roman) roman.textContent = r.roman;
-  if (inter) inter.textContent = intervalNameFromTonic(degreeToSemitonesFromTonic(iv, d));
-  if (idx) idx.textContent = `Slot ${slotIdx + 1}\n${formatSlotDegreeLabel(d, iv, tcp, pf)}`;
+  // Etiqueta auxiliar do campo "Nota" (caso alguém a mantenha por acessibilidade)
+  const noteLabel = slot.querySelector(".slot-deg-label");
+  if (noteLabel) noteLabel.textContent = "Nota";
+
+  // Reflecte oct no eventual `<select>` caso exista (robustez a reuso de DOM)
+  const octSel = slot.querySelector('select[data-field="oct"]');
+  if (octSel) octSel.value = String(oct);
 }
 
 function buildSlots() {
   const root = document.getElementById("slots");
   root.innerHTML = "";
 
+  const ivalsInit = currentIvals();
+  const tcpInit = currentTonicPc();
+
   for (let i = 0; i < 8; i += 1) {
     const slot = document.createElement("div");
     slot.className = "slot";
     slot.dataset.index = String(i);
+
+    // --- PC inicial: seed diatónico da escala actual (congela a nota que o
+    // usuário ouve na primeira vez). Mudar escala/tónica depois não altera
+    // este valor — é isso que permite «experimentalismo» fora da escala.
+    const nInit = ivalsInit.length;
+    const seedStep = i % nInit;
+    const seedOct = Math.max(-1, Math.min(2, Math.floor(i / nInit)));
+    const seedPc = ((tcpInit + ivalsInit[seedStep]) % 12 + 12) % 12;
+    slot.dataset.pc = String(seedPc);
+    slot.dataset.oct = String(seedOct);
 
     const idx = document.createElement("div");
     idx.className = "slot-index";
@@ -2399,39 +2477,52 @@ function buildSlots() {
     on.addEventListener("change", () => {
       slot.classList.toggle("on", on.checked);
       scheduleSyncAudio();
+      updateSlotsMissingNotes();
     });
 
-    const degSel = document.createElement("select");
-    for (let d = 1; d <= MAX_DEGREE_LABEL; d += 1) {
-      const o = document.createElement("option");
-      o.value = String(d);
-      o.textContent = formatSlotDegreeLabel(d, currentIvals(), currentTonicPc(), preferFlats());
-      degSel.appendChild(o);
+    // Barra cromática: 12 botões (C, C#, D, ..., B). Cada botão define s.pc.
+    const bar = document.createElement("div");
+    bar.className = "slot-chroma-bar";
+    bar.setAttribute("role", "radiogroup");
+    bar.setAttribute("aria-label", "Classe de altura do slot");
+    for (let p = 0; p < 12; p += 1) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "chroma-pc";
+      btn.dataset.pc = String(p);
+      btn.setAttribute("role", "radio");
+      btn.addEventListener("click", () => {
+        slot.dataset.pc = String(p);
+        refreshSlotRow(slot);
+        scheduleSyncAudio();
+        updateSlotsMissingNotes();
+      });
+      bar.appendChild(btn);
     }
-    degSel.value = String((i % currentIvals().length) + 1);
 
     const octSel = document.createElement("select");
+    octSel.dataset.field = "oct";
     for (let o = -1; o <= 2; o += 1) {
       const opt = document.createElement("option");
       opt.value = String(o);
       opt.textContent = o >= 0 ? `+${o} 8va` : `${o} 8va`;
       octSel.appendChild(opt);
     }
-    octSel.value = "0";
+    octSel.value = String(seedOct);
 
     const wrapOn = document.createElement("label");
     wrapOn.className = "field field-inline";
     wrapOn.appendChild(document.createElement("span")).textContent = "Ativo";
     wrapOn.appendChild(on);
 
-    const degLabel = document.createElement("span");
-    degLabel.className = "slot-deg-label";
-    degLabel.textContent = "Grau";
+    const noteLabel = document.createElement("span");
+    noteLabel.className = "slot-deg-label";
+    noteLabel.textContent = "Nota";
 
-    const wrapDeg = document.createElement("label");
-    wrapDeg.className = "field field-inline";
-    wrapDeg.appendChild(degLabel);
-    wrapDeg.appendChild(degSel);
+    const wrapNote = document.createElement("div");
+    wrapNote.className = "field field-block";
+    wrapNote.appendChild(noteLabel);
+    wrapNote.appendChild(bar);
 
     const wrapOct = document.createElement("label");
     wrapOct.className = "field field-inline";
@@ -2442,17 +2533,13 @@ function buildSlots() {
     slot.appendChild(roman);
     slot.appendChild(inter);
     slot.appendChild(wrapOn);
-    slot.appendChild(wrapDeg);
+    slot.appendChild(wrapNote);
     slot.appendChild(wrapOct);
 
     refreshSlotRow(slot);
 
-    degSel.addEventListener("change", () => {
-      refreshSlotRow(slot);
-      scheduleSyncAudio();
-      updateSlotsMissingNotes();
-    });
     octSel.addEventListener("change", () => {
+      slot.dataset.oct = String(Number(octSel.value));
       refreshSlotRow(slot);
       scheduleSyncAudio();
     });
@@ -2473,12 +2560,15 @@ function readSlotsState() {
   const out = [];
   slotsEl.forEach((slot) => {
     const on = slot.querySelector('input[type="checkbox"]')?.checked ?? false;
-    const selects = slot.querySelectorAll("select");
-    const deg = Number(selects[0]?.value ?? 1);
-    const oct = Number(selects[1]?.value ?? 0);
-    // `chordType` é mantido no shape por retro-compat com callers antigos,
-    // mas não afeta mais a síntese: cada slot = 1 nota na visualização única.
-    out.push({ on, deg, oct, chordType: "maj" });
+    const pcRaw = Number(slot.dataset.pc);
+    const octFromDs = Number(slot.dataset.oct);
+    const octSelEl = slot.querySelector('select[data-field="oct"]');
+    const pc = Number.isFinite(pcRaw) ? ((pcRaw % 12) + 12) % 12 : 0;
+    const oct = Number.isFinite(octFromDs)
+      ? octFromDs
+      : Number(octSelEl?.value ?? 0);
+    // `chordType` mantido por retro-compat; a síntese usa sempre 1 nota por slot.
+    out.push({ on, pc, oct, chordType: "maj" });
   });
   return out;
 }
@@ -2492,26 +2582,33 @@ function updateSlotsMissingNotes() {
   const pf = preferFlats();
 
   if (el) {
-    const n = ivals.length;
-    const present = new Set();
-    active.forEach((s) => {
-      const stepIdx = ((s.deg - 1) % n + n) % n;
-      present.add(stepIdx);
-    });
-    const missing = [];
-    for (let d = 0; d < n; d += 1) {
-      if (!present.has(d)) {
-        const notePc = (tcp + ivals[d]) % 12;
-        missing.push(pcToName(notePc, pf));
+    // Comparação agora puramente cromática: quais pcs da escala actual estão
+    // representados pelos slots activos (independentemente do pc escolhido ser
+    // diatónico ou não). Notas fora da escala aparecem como «extras».
+    const scalePcs = [];
+    const scalePcSet = new Set();
+    ivals.forEach((st) => {
+      const p = ((tcp + st) % 12 + 12) % 12;
+      if (!scalePcSet.has(p)) {
+        scalePcs.push(p);
+        scalePcSet.add(p);
       }
-    }
+    });
+    const presentPcs = new Set(active.map((s) => ((s.pc % 12) + 12) % 12));
+    const missing = scalePcs.filter((p) => !presentPcs.has(p)).map((p) => pcToName(p, pf));
+    const extras = [...presentPcs]
+      .filter((p) => !scalePcSet.has(p))
+      .sort((a, b) => a - b)
+      .map((p) => pcToName(p, pf));
+
     if (!active.length) {
-      const base = ivals.map((st) => pcToName((tcp + st) % 12, pf)).join(", ");
+      const base = scalePcs.map((p) => pcToName(p, pf)).join(", ");
       el.textContent = `Notas da escala (nenhum slot ativo): ${base}`;
     } else {
-      el.textContent = missing.length
-        ? `Notas faltantes nos slots: ${missing.join(", ")}`
-        : "Notas faltantes nos slots: —";
+      const parts = [];
+      parts.push(missing.length ? `Notas faltantes nos slots: ${missing.join(", ")}` : "Notas faltantes nos slots: —");
+      if (extras.length) parts.push(`fora da escala: ${extras.join(", ")}`);
+      el.textContent = parts.join(" · ");
     }
   }
   updateSlotChordLabel();
@@ -2541,7 +2638,10 @@ function syncAudio() {
 
   const states = readSlotsState();
   states.forEach((s, i) => {
-    const midi = midiForScaleDegree(tcp, ivals, s.deg, baseOct + s.oct);
+    // MIDI puramente cromático: independente de `ivals`/`tcp`. A escala no
+    // topo é só visualização; o áudio do slot segue o pc escolhido na barra.
+    const pc = ((s.pc % 12) + 12) % 12;
+    const midi = pc + 12 * (baseOct + 1) + 12 * s.oct;
     const slotOn = soundMode === "sample" ? false : s.on;
     audio.setSlot(i, slotOn, midiToFreq(midi), slotVol);
   });

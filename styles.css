@@ -776,6 +776,72 @@ input[type="checkbox"]:focus-visible {
   font-size: 0.68rem;
 }
 
+.field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: unset;
+}
+
+.field-block > span.slot-deg-label {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+/* Barra cromática dos slots: 12 notas em grelha 3×4. */
+.slot-chroma-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.chroma-pc {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--line);
+  background: #0f1218;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 0.22rem 0.1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  min-height: 1.6rem;
+  line-height: 1;
+  transition: background 0.08s ease, color 0.08s ease, border-color 0.08s ease;
+}
+
+.chroma-pc:hover {
+  border-color: var(--accent-2, #6c9cff);
+}
+
+.chroma-pc.diatonic {
+  color: #dfe7f5;
+  background: #141a24;
+  border-color: rgba(108, 156, 255, 0.35);
+}
+
+.chroma-pc:not(.diatonic) {
+  opacity: 0.72;
+  font-style: italic;
+}
+
+.chroma-pc.selected {
+  background: rgba(108, 156, 255, 0.55);
+  color: #fff;
+  border-color: var(--accent-2, #6c9cff);
+  font-style: normal;
+  opacity: 1;
+}
+
+.chroma-pc.selected:not(.diatonic) {
+  background: rgba(255, 170, 80, 0.5);
+  border-color: rgba(255, 170, 80, 0.9);
+}
+
 .foot {
   padding: 0 1.25rem 2rem;
   color: var(--muted);
