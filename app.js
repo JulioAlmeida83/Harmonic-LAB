@@ -978,11 +978,137 @@ let scaleLoopTimer = null;
 
 /** Timers de highlight visual da escala — limpos no stop para evitar ficar "aceso". */
 const scaleHighlightTimers = [];
+/** Highlights da faixa de notas da sequência (sincronizados com o áudio). */
+const seqStripHighlightTimers = [];
+
+function clearScaleSeqStripUi() {
+  for (const t of seqStripHighlightTimers) clearTimeout(t);
+  seqStripHighlightTimers.length = 0;
+  document.querySelectorAll(".scale-seq-pill.is-current").forEach((el) => el.classList.remove("is-current"));
+}
+
 function clearScaleHighlights() {
   for (const t of scaleHighlightTimers) clearTimeout(t);
   scaleHighlightTimers.length = 0;
+  clearScaleSeqStripUi();
   const strip = document.getElementById("degreeStrip");
   if (strip) strip.querySelectorAll(".degree-col.is-playing").forEach((el) => el.classList.remove("is-playing"));
+}
+
+/** Altura de referência (mediana do acorde) para manter a escala na mesma zona registral. */
+function getScaleHarmonyReferenceMidi() {
+  const baseOct = slotsPlaybackBaseOct();
+  const tcp = currentTonicPc();
+  const progStep = getActiveProgressionStep();
+  if (progStep?.step?.chord) {
+    const notes = chordMidisAbsolute(progStep.step.chord, baseOct);
+    if (notes.length) {
+      const s = [...notes].sort((a, b) => a - b);
+      return s[Math.floor(s.length / 2)];
+    }
+  }
+  const harmId = document.getElementById("harmonyBase")?.value ?? "off";
+  if (harmId !== "off") {
+    const notes = harmonyMidis(tcp, harmonyRefIvals(), harmId, baseOct);
+    if (notes.length) {
+      const s = [...notes].sort((a, b) => a - b);
+      return s[Math.floor(s.length / 2)];
+    }
+  }
+  return midiTonic(tcp, currentTonicOctave());
+}
+
+/**
+ * Mantém cada nota da sequência dentro de [ref−12, ref+12] (no máx. 1 oitava
+ * abaixo e 1 acima da altura de referência da harmonia).
+ */
+function constrainScaleMidisAroundHarmony(midis, refMidi) {
+  const lo = refMidi - 12;
+  const hi = refMidi + 12;
+  if (!midis.length) return midis.slice();
+  const minM = Math.min(...midis);
+  const maxM = Math.max(...midis);
+  for (let k = -6; k <= 6; k += 1) {
+    const shift = k * 12;
+    if (minM + shift >= lo && maxM + shift <= hi) return midis.map((m) => m + shift);
+  }
+  return midis.map((m) => {
+    let x = m;
+    for (let guard = 0; guard < 16; guard += 1) {
+      if (x >= lo && x <= hi) break;
+      if (x < lo) x += 12;
+      else x -= 12;
+    }
+    return clampMidi(x);
+  });
+}
+
+function renderScaleSeqPreview(degs, midis) {
+  const host = document.getElementById("scaleSeqStrip");
+  if (!host) return;
+  host.innerHTML = "";
+  const pf = preferFlats();
+  for (let i = 0; i < midis.length; i += 1) {
+    const pill = document.createElement("span");
+    pill.className = "scale-seq-pill";
+    pill.dataset.index = String(i);
+    pill.textContent = `${midiNoteLabel(midis[i], pf)} · gr. ${degs[i]}`;
+    host.appendChild(pill);
+  }
+}
+
+function scheduleScaleSeqStripHighlights(t0Abs, times, durs, myToken, ctxNow) {
+  const pills = document.querySelectorAll("#scaleSeqStrip .scale-seq-pill");
+  if (!pills.length) return;
+  for (let i = 0; i < times.length; i += 1) {
+    const startMs = Math.max(0, Math.round((t0Abs + times[i] - ctxNow) * 1000));
+    const endMs = Math.max(startMs + 50, Math.round(startMs + (durs[i] ?? 0.12) * 1000));
+    seqStripHighlightTimers.push(
+      setTimeout(() => {
+        if (myToken !== scaleLoopToken) return;
+        pills[i]?.classList.add("is-current");
+      }, startMs),
+    );
+    seqStripHighlightTimers.push(
+      setTimeout(() => {
+        if (myToken !== scaleLoopToken) return;
+        pills[i]?.classList.remove("is-current");
+      }, endMs),
+    );
+  }
+}
+
+function populateScaleStudyCombo() {
+  const sel = document.getElementById("scaleStudyCombo");
+  const presets = globalThis.SCALE_STUDY_PRESETS;
+  if (!sel || !Array.isArray(presets)) return;
+  while (sel.children.length > 1) sel.removeChild(sel.lastChild);
+  for (const p of presets) {
+    if (!p || !p.id || !CHORD_PROGRESSIONS[p.progressionKey]) continue;
+    const o = document.createElement("option");
+    o.value = p.id;
+    o.textContent = p.label || p.id;
+    sel.appendChild(o);
+  }
+}
+
+function applyScaleStudyPreset(presetId) {
+  if (!presetId || !Array.isArray(globalThis.SCALE_STUDY_PRESETS)) return;
+  const item = globalThis.SCALE_STUDY_PRESETS.find((x) => x.id === presetId);
+  if (!item || !CHORD_PROGRESSIONS[item.progressionKey]) return;
+  const progEnabled = document.getElementById("progEnabled");
+  if (progEnabled && !progEnabled.checked) {
+    progEnabled.checked = true;
+    progEnabled.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  progLoadPreset(item.progressionKey);
+  const scaleSel = document.getElementById("scaleType");
+  if (scaleSel && item.defaultScale && SCALE_TYPES[item.defaultScale]) {
+    scaleSel.value = item.defaultScale;
+    scaleSel.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  const combo = document.getElementById("scaleStudyCombo");
+  if (combo) combo.value = "";
 }
 
 function scheduleSyncAudio() {
@@ -3640,7 +3766,9 @@ function wireGlobalControls() {
     const loopGap = Number(document.getElementById("seqLoopGap")?.value ?? 0.5) || 0;
     const degs = buildScaleDegrees(ivals, dir, oct);
     const baseOct = slotsPlaybackBaseOct();
-    const midis = degs.map((d) => midiForScaleDegree(tcp, ivals, d, baseOct));
+    let midis = degs.map((d) => midiForScaleDegree(tcp, ivals, d, baseOct));
+    const harmRef = getScaleHarmonyReferenceMidi();
+    midis = constrainScaleMidisAroundHarmony(midis, harmRef);
     const freqs = midis.map((m) => midiToFreq(m));
     const { times, durs, total } = rhythmPattern(rhythm, bpm, freqs.length, latch);
 
@@ -3695,6 +3823,9 @@ function wireGlobalControls() {
         );
       }
     }
+
+    renderScaleSeqPreview(degs, midis);
+    scheduleScaleSeqStripHighlights(t0Ui, times, durs, myToken, ctxNow);
 
     // Passamos o t0 já calculado (com latch aplicado): garante que as luzes
     // e as notas arrancam no mesmo instante absoluto.
@@ -3755,6 +3886,15 @@ function wireGlobalControls() {
         }
         clearScaleHighlights();
       }
+    });
+  }
+
+  populateScaleStudyCombo();
+  const scaleStudyCombo = document.getElementById("scaleStudyCombo");
+  if (scaleStudyCombo) {
+    scaleStudyCombo.addEventListener("change", () => {
+      const v = scaleStudyCombo.value;
+      if (v) applyScaleStudyPreset(v);
     });
   }
 

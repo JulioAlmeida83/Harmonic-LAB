@@ -549,6 +549,15 @@
         <span>Oitavas</span>
         <input type="number" id="seqOctaves" min="1" max="4" value="1" />
       </label>
+      <label class="field field-wide is-advanced">
+        <span>Estudo (células + escala)</span>
+        <select
+          id="scaleStudyCombo"
+          title="Carrega uma progressão curta e sugere uma escala para ouvir e tocar por cima (ativa a sequência automaticamente)"
+        >
+          <option value="">— escolher —</option>
+        </select>
+      </label>
       <label class="field field-check is-advanced" title="Começa a escala no próximo tempo do BPM em vez de imediatamente (evita colisões rítmicas)">
         <input type="checkbox" id="seqLatch" checked />
         <span>Encaixe no próximo tempo</span>
@@ -583,6 +592,12 @@
         title="Interrompe a execução da escala"
         aria-label="Parar execução da escala"
       >■ Parar</button>
+    </div>
+    <div class="scale-seq-wrap" aria-label="Pré-visualização da sequência da escala">
+      <div class="scale-seq-hint">
+        Sequência (registo ajustado à harmonia ativa: ±1 oitava em torno da mediana do acorde). A nota sublinhada acompanha o som.
+      </div>
+      <div id="scaleSeqStrip" class="scale-seq-strip" role="list"></div>
     </div>
   </section>
 

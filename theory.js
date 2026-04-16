@@ -663,11 +663,11 @@ function classifyProgressionToken(s) {
 function parseAbsoluteChord(str) {
   if (typeof str !== "string") throw new Error("parseAbsoluteChord: string esperada");
   const s = str.trim();
-  const m = s.match(/^([A-G])([#b♭♯]?)(.*)$/);
+  const m = s.match(/^([A-Ga-g])([#b♭♯]?)(.*)$/);
   if (!m) throw new Error(`Acorde inválido: ${str}`);
   const [, letter, accRaw, tailRaw] = m;
   const acc = normalizeAccidental(accRaw);
-  const rootKey = letter + acc;
+  const rootKey = letter.toUpperCase() + acc;
   const rootPc = NOTE_MAP[rootKey];
   if (rootPc == null) throw new Error(`Nota inválida: ${rootKey}`);
   const qualRaw = tailRaw.trim();
@@ -823,6 +823,7 @@ const PROGRESSION_CATEGORIES = {
   jazz_bossa_minor: "Jazz · bossa (menor)",
   pragmatic: "Variações pragmáticas",
   classic: "Clássicos & clichês",
+  study_melodic_cells: "Estudo · células (percepção)",
 };
 
 /**
@@ -1917,6 +1918,67 @@ const CHORD_PROGRESSIONS = {
     ],
   },
 
+  // --- Estudo · células (curtas, para leitura + execução) -------------------
+  study_cell_251: {
+    label: "Célula ii7–V7–Imaj7 (cadência 2–5–1)",
+    category: "study_melodic_cells",
+    defaultScale: "major",
+    steps: [
+      { roman: "ii7", bars: 1 },
+      { roman: "V7", bars: 1 },
+      { roman: "Imaj7", bars: 2 },
+    ],
+  },
+  study_cell_vi_ii_V: {
+    label: "Célula vi–ii–V (rotação relativa)",
+    category: "study_melodic_cells",
+    defaultScale: "mixolydian",
+    steps: [
+      { roman: "vi", bars: 1 },
+      { roman: "ii", bars: 1 },
+      { roman: "V", bars: 1 },
+    ],
+  },
+  study_cell_bVI_bVII_I: {
+    label: "Célula ♭VI–♭VII–I (campo paralelo)",
+    category: "study_melodic_cells",
+    defaultScale: "mixolydian",
+    steps: [
+      { roman: "bVI", bars: 1 },
+      { roman: "bVII", bars: 1 },
+      { roman: "I", bars: 2 },
+    ],
+  },
+  study_cell_minor_ii_V_i: {
+    label: "Célula menor iiø–V7–i",
+    category: "study_melodic_cells",
+    defaultScale: "harmonic_minor",
+    steps: [
+      { roman: "iiø", bars: 1 },
+      { roman: "V7", bars: 1 },
+      { roman: "i", bars: 2 },
+    ],
+  },
+  study_cell_dorian_i_iv: {
+    label: "Célula modal i–iv (dórico)",
+    category: "study_melodic_cells",
+    defaultScale: "dorian",
+    steps: [
+      { roman: "i", bars: 2 },
+      { roman: "iv", bars: 2 },
+    ],
+  },
+  study_cell_dom_secondary: {
+    label: "Célula V7/ii → V7/V → V7 (cadeia dominante)",
+    category: "study_melodic_cells",
+    defaultScale: "mixolydian",
+    steps: [
+      { roman: "V7/ii", bars: 1 },
+      { roman: "V7/V", bars: 1 },
+      { roman: "V7", bars: 1 },
+    ],
+  },
+
   // --- Clássicos ------------------------------------------------------------
   canon: {
     label: "Canon (I–V–vi–iii–IV–I–IV–V)",
@@ -1934,6 +1996,49 @@ const CHORD_PROGRESSIONS = {
     ],
   },
 };
+
+/**
+ * Atalhos didáticos: progressão curta em `CHORD_PROGRESSIONS` + escala sugerida
+ * em `SCALE_TYPES` (o UI pode carregar os dois de uma vez).
+ */
+const SCALE_STUDY_PRESETS = [
+  {
+    id: "study_cell_251",
+    label: "2–5–1 maior (ii7→V7→Imaj7) · jônio",
+    progressionKey: "study_cell_251",
+    defaultScale: "major",
+  },
+  {
+    id: "study_cell_vi_ii_V",
+    label: "vi→ii→V · mixolídio (centro dominante)",
+    progressionKey: "study_cell_vi_ii_V",
+    defaultScale: "mixolydian",
+  },
+  {
+    id: "study_cell_bVI_bVII_I",
+    label: "♭VI→♭VII→I · mixolídio",
+    progressionKey: "study_cell_bVI_bVII_I",
+    defaultScale: "mixolydian",
+  },
+  {
+    id: "study_cell_minor_ii_V_i",
+    label: "iiø→V7→i · menor harmônica",
+    progressionKey: "study_cell_minor_ii_V_i",
+    defaultScale: "harmonic_minor",
+  },
+  {
+    id: "study_cell_dorian_i_iv",
+    label: "i↔iv · dórico (modal)",
+    progressionKey: "study_cell_dorian_i_iv",
+    defaultScale: "dorian",
+  },
+  {
+    id: "study_cell_dom_secondary",
+    label: "V7/ii→V7/V→V7 · mixolídio",
+    progressionKey: "study_cell_dom_secondary",
+    defaultScale: "mixolydian",
+  },
+];
 
 // --- Sequência: resolução e avanço por compasso -----------------------------
 
@@ -2276,6 +2381,7 @@ const SOLO_RHYTHM_IDS = Object.keys(SOLO_RHYTHMS);
   // Sequências de acordes
   CHORD_PROGRESSIONS,
   PROGRESSION_CATEGORIES,
+  SCALE_STUDY_PRESETS,
   resolveSequenceStep,
   resolveSequence,
   stepAtBar,

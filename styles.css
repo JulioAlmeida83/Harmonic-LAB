@@ -134,6 +134,46 @@ body.mode-simple .is-advanced {
   align-items: flex-end;
 }
 
+.scale-seq-wrap {
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line);
+}
+
+.scale-seq-hint {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 0.55rem;
+  line-height: 1.35;
+  letter-spacing: 0.03em;
+}
+
+.scale-seq-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.scale-seq-pill {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  padding: 0.32rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  list-style: none;
+}
+
+.scale-seq-pill.is-current {
+  border-color: rgba(108, 156, 255, 0.7);
+  background: rgba(108, 156, 255, 0.2);
+  box-shadow: 0 0 0 1px rgba(108, 156, 255, 0.22);
+}
+
 .row-instrument {
   margin-top: 0.85rem;
   padding-top: 0.85rem;
