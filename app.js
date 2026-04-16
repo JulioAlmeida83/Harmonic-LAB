@@ -277,6 +277,7 @@ function updateScaleStarLabels() {
       opt.setAttribute("data-fit", String(r));
     }
   }
+  syncSoloScaleOptionLabelsFromGlobal();
 }
 
 /** Com «harmonia desligada», baixo pode usar tríade em I como referência. */
@@ -284,6 +285,262 @@ function effectiveHarmonyIdForBassSamples(harmId) {
   if (harmId !== "off") return harmId;
   if (document.getElementById("bassWithHarmonyOff")?.checked) return "deg1";
   return "off";
+}
+
+/** Escala usada nas frases de solo (select próprio ou a global «Escala completa»). */
+function effectiveSoloScaleKey() {
+  const soloSel = document.getElementById("soloScaleType")?.value;
+  if (soloSel) return soloSel;
+  return document.getElementById("scaleType")?.value || "major";
+}
+
+/**
+ * Intervalos para harmonia estática e baixo quando «Base harmónica na escala do solo»
+ * está activo — alinha graus I–VII à escala escolhida para o solo.
+ */
+function effectiveStaticHarmonyIvals() {
+  if (!document.getElementById("soloAlignHarmonyWithScale")?.checked) {
+    return harmonyRefIvals();
+  }
+  const iv = SCALE_TYPES[effectiveSoloScaleKey()]?.intervals;
+  return iv && iv.length ? iv : harmonyRefIvals();
+}
+
+/** Padrão rítmico/arpejo: sequência activa usa `progHarmonyStyle`; caso contrário `harmonyStyle`. */
+function effectiveHarmonyExecStyle() {
+  if (getActiveProgressionStep()) {
+    const p = document.getElementById("progHarmonyStyle")?.value;
+    if (p) return p;
+  }
+  return document.getElementById("harmonyStyle")?.value || "sustain";
+}
+
+/** Tríade na tônica coerente com o tipo de escala (para solo sem progressão). */
+function buildTonicTriadChordFromScale(tonicPc, scaleKey) {
+  const iv = SCALE_TYPES[scaleKey]?.intervals || SCALE_TYPES.major.intervals;
+  if (iv.length >= 7) {
+    const { third, fifth } = diatonicTriadSemitonesFromRoot(iv, 0);
+    return { rootPc: tonicPc, intervals: [0, third, fifth], label: "I" };
+  }
+  if (scaleKey === "pent_minor" || scaleKey === "blues") {
+    return { rootPc: tonicPc, intervals: [0, 3, 7], label: "I" };
+  }
+  return { rootPc: tonicPc, intervals: [0, 4, 7], label: "I" };
+}
+
+/** Teto e chão MIDI para qualquer linha de solo (instrumentos melódicos). */
+const SOLO_MELODY_MIDI_ABS_MIN = 36; // C2
+const SOLO_MELODY_MIDI_ABS_MAX = 96; // C7
+
+/**
+ * Janela de oitavas centrada na fundamental do acorde no registo escolhido na UI.
+ * Padrões com saltos grandes são corrigidos com `wrapMidiToRange` (mantém classes de altura).
+ */
+function soloMelodyMidiWindow(chordRootPc, soloOctUi) {
+  const rootPc = ((Number(chordRootPc) % 12) + 12) % 12;
+  let o = Number(soloOctUi);
+  if (!Number.isFinite(o)) o = 4;
+  o = Math.max(2, Math.min(6, Math.round(o)));
+  const rootBase = 12 * (o + 1) + rootPc;
+  const spanDown = 14;
+  const spanUp = 26;
+  let lo = rootBase - spanDown;
+  let hi = rootBase + spanUp;
+  lo = Math.max(SOLO_MELODY_MIDI_ABS_MIN, lo);
+  hi = Math.min(SOLO_MELODY_MIDI_ABS_MAX, hi);
+  if (hi <= lo) hi = Math.min(SOLO_MELODY_MIDI_ABS_MAX, lo + 24);
+  return { lo, hi };
+}
+
+/** Aplica limites de tessitura a cada nota de solo (todos os padrões / ritmos). */
+function soloMidiToPlayableRange(rawMidi, chordRootPc, soloOctUi) {
+  const { lo, hi } = soloMelodyMidiWindow(chordRootPc, soloOctUi);
+  if (hi <= lo) return clampMidi(rawMidi);
+  return clampMidi(wrapMidiToRange(rawMidi, lo, hi));
+}
+
+/**
+ * Acorde + escala para o motor de solo: progressão ou tríade I na tonalidade.
+ */
+function resolveSoloChordAndScale(tcp) {
+  const mode = document.getElementById("soloContextMode")?.value ?? "static_key";
+  const progStep = getActiveProgressionStep();
+  if (mode === "progression" && progStep?.step?.chord) {
+    const chord = progStep.step.chord;
+    const scaleResult = pickParentScaleForChord(chord, tcp);
+    const scaleKey = scaleResult?.key || "major";
+    const scaleIvals = SCALE_TYPES[scaleKey]?.intervals || SCALE_TYPES.major.intervals;
+    return { chord, scaleIvals, scaleKey, fromProgression: true };
+  }
+  const scaleKey = effectiveSoloScaleKey();
+  const scaleIvals = SCALE_TYPES[scaleKey]?.intervals || SCALE_TYPES.major.intervals;
+  const chord = buildTonicTriadChordFromScale(tcp, scaleKey);
+  return { chord, scaleIvals, scaleKey, fromProgression: false };
+}
+
+function populateProgHarmonyStyleSelect() {
+  const src = document.getElementById("harmonyStyle");
+  const dst = document.getElementById("progHarmonyStyle");
+  if (!src || !dst || dst.options.length) return;
+  dst.innerHTML = src.innerHTML;
+  dst.value = src.value || "sustain";
+}
+
+function populateSoloScaleSelect() {
+  const scaleType = document.getElementById("scaleType");
+  const solo = document.getElementById("soloScaleType");
+  if (!scaleType || !solo) return;
+  const prev = solo.value;
+  solo.innerHTML = "";
+  const o0 = document.createElement("option");
+  o0.value = "";
+  o0.textContent = "Igual à escala global («Escala completa»)";
+  solo.appendChild(o0);
+  for (const child of scaleType.children) {
+    solo.appendChild(child.cloneNode(true));
+  }
+  const valid = prev && [...solo.options].some((o) => o.value === prev);
+  solo.value = valid ? prev : "";
+}
+
+function syncSoloScaleOptionLabelsFromGlobal() {
+  const solo = document.getElementById("soloScaleType");
+  const globalSel = document.getElementById("scaleType");
+  if (!solo || !globalSel) return;
+  for (let i = 0; i < solo.options.length; i += 1) {
+    const opt = solo.options[i];
+    if (!opt.value) continue;
+    const ref = [...globalSel.options].find((o) => o.value === opt.value);
+    if (ref) opt.textContent = ref.textContent;
+  }
+}
+
+/** Cenas pré-definidas: escala solo, harmonia, padrões e opcionalmente progressão. */
+function applySoloScenePreset(key) {
+  if (!key) return;
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (!el || val === undefined || val === null) return;
+    if (el.type === "checkbox") {
+      el.checked = Boolean(val);
+    } else {
+      el.value = val;
+    }
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const presets = {
+    static_major_walk: () => {
+      setVal("soloContextMode", "static_key");
+      const pe0 = document.getElementById("progEnabled");
+      if (pe0?.checked) {
+        pe0.checked = false;
+        pe0.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      setVal("soloScaleType", "");
+      setVal("scaleType", "major");
+      setVal("soloAlignHarmonyWithScale", true);
+      setVal("harmonyBase", "deg1");
+      setVal("harmonyStyle", "sustain");
+      setVal("progHarmonyStyle", "strum_ballad");
+      setVal("soloPattern", "scale_up");
+      setVal("soloRhythm", "eighths");
+    },
+    static_dorian_groove: () => {
+      setVal("soloContextMode", "static_key");
+      const pe0 = document.getElementById("progEnabled");
+      if (pe0?.checked) {
+        pe0.checked = false;
+        pe0.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      setVal("soloScaleType", "dorian");
+      setVal("soloAlignHarmonyWithScale", true);
+      setVal("harmonyBase", "deg1");
+      setVal("harmonyStyle", "chord_pulse_8");
+      setVal("progHarmonyStyle", "strum_rock_8");
+      setVal("soloPattern", "skip_scale");
+      setVal("soloRhythm", "eighths");
+    },
+    static_pent_blues: () => {
+      setVal("soloContextMode", "static_key");
+      const pe0 = document.getElementById("progEnabled");
+      if (pe0?.checked) {
+        pe0.checked = false;
+        pe0.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      setVal("soloScaleType", "pent_minor");
+      setVal("soloAlignHarmonyWithScale", true);
+      setVal("harmonyBase", "deg1");
+      setVal("harmonyStyle", "pluck");
+      setVal("progHarmonyStyle", "strum_rock_8");
+      setVal("soloPattern", "pent_blue");
+      setVal("soloRhythm", "swing");
+    },
+    static_bossa_line: () => {
+      setVal("soloContextMode", "static_key");
+      const pe0 = document.getElementById("progEnabled");
+      if (pe0?.checked) {
+        pe0.checked = false;
+        pe0.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      setVal("soloScaleType", "mixolydian");
+      setVal("soloAlignHarmonyWithScale", true);
+      setVal("harmonyBase", "deg1");
+      setVal("harmonyStyle", "strum_bossa");
+      setVal("progHarmonyStyle", "strum_bossa");
+      setVal("soloPattern", "enclosure");
+      setVal("soloRhythm", "bossa");
+    },
+    prog_pop_ivvi: () => {
+      setVal("soloContextMode", "progression");
+      progLoadPreset("I_V_vi_IV_pop");
+      const pe = document.getElementById("progEnabled");
+      if (pe && !pe.checked) {
+        pe.checked = true;
+        pe.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      setVal("soloAlignHarmonyWithScale", false);
+      setVal("harmonyStyle", "sustain");
+      setVal("progHarmonyStyle", "strum_ballad");
+      setVal("soloPattern", "digital_1235");
+      setVal("soloRhythm", "swing");
+      setVal("scaleType", "major");
+    },
+    prog_blues12: () => {
+      setVal("soloContextMode", "progression");
+      progLoadPreset("blues_12_major");
+      const pe = document.getElementById("progEnabled");
+      if (pe && !pe.checked) {
+        pe.checked = true;
+        pe.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      setVal("soloScaleType", "mixolydian");
+      setVal("soloAlignHarmonyWithScale", false);
+      setVal("progHarmonyStyle", "strum_rock_8");
+      setVal("harmonyStyle", "pluck");
+      setVal("soloPattern", "pent");
+      setVal("soloRhythm", "shuffle");
+    },
+    prog_iiV_I: () => {
+      setVal("soloContextMode", "progression");
+      progLoadPreset("ii_V_I_major");
+      const pe = document.getElementById("progEnabled");
+      if (pe && !pe.checked) {
+        pe.checked = true;
+        pe.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      setVal("soloAlignHarmonyWithScale", false);
+      setVal("progHarmonyStyle", "strum_charleston");
+      setVal("harmonyStyle", "sustain");
+      setVal("soloPattern", "digital_1235");
+      setVal("soloRhythm", "swing");
+      setVal("scaleType", "major");
+    },
+  };
+  const fn = presets[key];
+  if (fn) fn();
+  populateSoloScaleSelect();
+  syncSoloScaleOptionLabelsFromGlobal();
+  refreshSampleExecutionLoop();
 }
 
 /** Deslocamento em semitonos (múltiplos de 12 na UI) aplicado às notas de baixo. */
@@ -1995,7 +2252,7 @@ function refreshSampleExecutionLoop() {
     if (!slotsIsolated && harmIdRaw !== "off" && !muteHarmChords && audio.harmStabBus) {
       const harmMidisRaw = progStep
         ? chordMidisAbsolute(progStep.step.chord, baseOct)
-        : harmonyMidis(tcp, harmonyRefIvals(), harmIdRaw, baseOct);
+        : harmonyMidis(tcp, effectiveStaticHarmonyIvals(), harmIdRaw, baseOct);
       // --- Normalização por instrumento ---------------------------------
       // Garante que o MESMO acorde soa "igual" em qualquer fonte sonora:
       // registro dentro do sweet-spot do instrumento, ganho calibrado, e
@@ -2016,7 +2273,7 @@ function refreshSampleExecutionLoop() {
       // gainScale do perfil aplicado ANTES do clamp: equaliza loudness entre
       // packs (trompete "hot" desce ~0.9, fagote/contrabaixo sobem ~1.05–1.10).
       const peak = Math.max(0.04, Math.min(peakHi, harmVol * 0.14 * progBoost * (normH.gainScale ?? 1)));
-      const harmonyStyleRaw = document.getElementById("harmonyStyle")?.value || "sustain";
+      const harmonyStyleRaw = effectiveHarmonyExecStyle();
       const harmonyStyle = resolveStyleOverride(harmonyStyleRaw, normH);
       const absBeat = sampleHarmonyBeatIndex;
       // Teto de segurança por nota (anti-clip): mais alto quando em progressão.
@@ -2067,7 +2324,6 @@ function refreshSampleExecutionLoop() {
       // Mantém compatibilidade com o antigo contador de "arpeggio": alguns
       // pontos do UI ainda podem lê-lo, e é barato atualizar.
       if (harmonyStyle === "arpeggio") sampleHarmonyArpIndex += 1;
-      sampleHarmonyBeatIndex += 1;
     } else {
       lastHarmHearStripSig = "";
       clearHarmonyHearVisuals();
@@ -2081,7 +2337,7 @@ function refreshSampleExecutionLoop() {
       // ancorados no chord.rootPc — os padrões (ostinato 1-5-1-3 etc.) continuam
       // a funcionar com os graus 1/3/5/7 do próprio acorde.
       const bassTonicPc = progStep ? progStep.step.chord.rootPc : tcp;
-      const bassIvals = progStep ? progSyntheticIvalsForChord(progStep.step.chord) : harmonyRefIvals();
+      const bassIvals = progStep ? progSyntheticIvalsForChord(progStep.step.chord) : effectiveStaticHarmonyIvals();
       const bassHarmId = progStep ? "deg1" : harmIdForBass;
       const bassOff = readHarmonyBassSemitoneOffset();
       const bMidiRaw = nextHarmonyBassMidi(
@@ -2104,7 +2360,7 @@ function refreshSampleExecutionLoop() {
         const bMidi = normB.midi;
         const bassVol = Number(document.getElementById("harmonyBassVol")?.value ?? 44) / 100;
         const bPeak = Math.max(0.04, Math.min(0.2, bassVol * 0.17 * (normB.gainScale ?? 1)));
-        const hStyleRaw0 = document.getElementById("harmonyStyle")?.value || "sustain";
+        const hStyleRaw0 = effectiveHarmonyExecStyle();
         const hStyleRaw = hStyleRaw0 === "arpeggio_full" ? "sustain" : hStyleRaw0;
         const hStyle = resolveStyleOverride(hStyleRaw, normB);
         // Duração: para walking bass/ostinato fica mais limpo se a nota não invade
@@ -2162,24 +2418,20 @@ function refreshSampleExecutionLoop() {
     }
 
     // ---- Solo / Improvisação ------------------------------------------------
-    // Gera linhas melódicas sobre a progressão activa. Cada mudança de acorde
-    // adapta automaticamente as notas ao modo correspondente (via
-    // pickParentScaleForChord). O padrão + ritmo são independentes e
-    // combináveis (10 × 8 = 80 combinações possíveis).
+    // Progressão: adapta ao acorde do step. Modo estático: tríade I na escala
+    // escolhida para o solo (sem precisar da sequência).
     const soloEnabled = document.getElementById("soloEnabled")?.checked;
-    if (soloEnabled && progStep && audio.instrumentSampler) {
-      const chord = progStep.step.chord;
+    if (soloEnabled && audio.instrumentSampler) {
+      const ctxSolo = resolveSoloChordAndScale(tcp);
+      const chord = ctxSolo.chord;
       if (chord && chord.intervals && chord.rootPc != null) {
-        const scaleResult = pickParentScaleForChord(chord, tcp);
-        const scaleKey = scaleResult?.key || "major";
-        const scaleIvals = SCALE_TYPES[scaleKey]?.intervals || SCALE_TYPES.major.intervals;
+        const scaleIvals = ctxSolo.scaleIvals;
         const soloPattern = document.getElementById("soloPattern")?.value || "arp_up";
         const soloRhythm = document.getElementById("soloRhythm")?.value || "swing";
         const soloVol = Number(document.getElementById("soloVol")?.value ?? 60) / 100;
         const soloOct = Number(document.getElementById("soloOctave")?.value ?? 4);
 
-        // Reset do padrão quando o acorde muda (nova frase por acorde).
-        const soloChordSig = `${chord.rootPc}|${chord.intervals.join(",")}`;
+        const soloChordSig = `${ctxSolo.fromProgression ? "P" : "S"}|${chord.rootPc}|${chord.intervals.join(",")}|${ctxSolo.scaleKey}`;
         if (soloChordSig !== lastSoloChordSig) {
           lastSoloChordSig = soloChordSig;
           soloPatIndex = 0;
@@ -2195,7 +2447,8 @@ function refreshSampleExecutionLoop() {
           const soloBits = [];
           for (let i = 0; i < degrees.length; i += 1) {
             const semitones = degrees[i];
-            const midi = clampMidi(12 * (soloOct + 1) + chord.rootPc + semitones, 24, 96);
+            const rawMidi = 12 * (soloOct + 1) + chord.rootPc + semitones;
+            const midi = soloMidiToPlayableRange(rawMidi, chord.rootPc, soloOct);
             soloBits.push(midiNoteLabel(midi, pfSolo));
             audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t + offsets[i], peak, durs[i]);
           }
@@ -2210,6 +2463,8 @@ function refreshSampleExecutionLoop() {
       const sl = document.getElementById("soloHearLine");
       if (sl) sl.textContent = "";
     }
+
+    sampleHarmonyBeatIndex += 1;
   };
 
   // Agendamento auto-encadeado: lê o BPM corrente em cada iteração (sem drift e sem
@@ -2456,6 +2711,9 @@ function populateSelects() {
     scaleType.appendChild(og);
   });
   scaleType.value = "major";
+
+  populateSoloScaleSelect();
+  populateProgHarmonyStyleSelect();
 
   // Clona optgroups/options do #bankInstrument para #bassBankInstrument — mantém
   // a lista em sincronia sem duplicar o markup. O primeiro <option value="match">
@@ -2901,7 +3159,7 @@ function syncAudio() {
 
   const harmId = document.getElementById("harmonyBase").value;
   const muteHarmChords = harmonyChordSamplesMuted();
-  const harmMidis = harmonyMidis(tcp, harmonyRefIvals(), harmId, baseOct);
+  const harmMidis = harmonyMidis(tcp, effectiveStaticHarmonyIvals(), harmId, baseOct);
   const freqsH = harmMidis.map((m) => midiToFreq(m));
   const harmVolApplied = soundMode === "sample" ? 0 : harmId === "off" || muteHarmChords ? 0 : harmVol;
   audio.setHarmony(freqsH, harmVolApplied);
@@ -2923,7 +3181,7 @@ function syncAudio() {
   } else if (audio.instrumentSampler && audio.harmStabBus) {
     // Sem `scaleKey` no hash: o acorde independe da escala, então mudar o
     // «Tipo de escala» não deve re-disparar um stab da harmonia.
-    const style = document.getElementById("harmonyStyle")?.value || "sustain";
+    const style = effectiveHarmonyExecStyle();
     const hk = `${tcp}|${harmId}|${style}|${muteHarmChords ? 1 : 0}`;
     if (!audio._harmStabPrimed) {
       audio._harmStabPrimed = true;
@@ -3690,6 +3948,7 @@ function wireGlobalControls() {
     "preferFlats",
     "harmonyBase",
     "harmonyStyle",
+    "progHarmonyStyle",
     "harmonyMuteChords",
     "bassWithHarmonyOff",
     "harmonyBassMode",
@@ -3703,6 +3962,9 @@ function wireGlobalControls() {
     "soloPattern",
     "soloRhythm",
     "soloOctave",
+    "soloContextMode",
+    "soloScaleType",
+    "soloAlignHarmonyWithScale",
   ].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", onContextChange);
@@ -3786,11 +4048,19 @@ function wireGlobalControls() {
       alert("O solo improvisado usa o banco de amostras. Confirme o modo Instrumento e que o áudio está activo.");
       return;
     }
-    if (!progState.enabled || !progState.resolved.length) {
+    const mode = document.getElementById("soloContextMode")?.value ?? "static_key";
+    if (mode === "progression" && (!progState.enabled || !progState.resolved.length)) {
       alert(
-        "Active «Ativar sequência» na secção Sequência de acordes e defina (ou carregue) pelo menos um passo — o solo segue a progressão.",
+        "Modo «Seguir sequência»: active «Ativar sequência» e defina passos no editor (ou use um «Preset de cena» com progressão).",
       );
       return;
+    }
+    if (document.getElementById("soloAutoEnableHarmony")?.checked) {
+      const hb = document.getElementById("harmonyBase");
+      if (hb && hb.value === "off") {
+        hb.value = "deg1";
+        hb.dispatchEvent(new Event("change", { bubbles: true }));
+      }
     }
     const chk = document.getElementById("soloEnabled");
     if (!chk) return;
@@ -3819,6 +4089,17 @@ function wireGlobalControls() {
   document.querySelectorAll(".js-solo-stop").forEach((b) => b.addEventListener("click", onSoloStop));
   const soloEnabledEl = document.getElementById("soloEnabled");
   if (soloEnabledEl) soloEnabledEl.addEventListener("change", syncSoloTransportUi);
+
+  const soloScenePresetEl = document.getElementById("soloScenePreset");
+  if (soloScenePresetEl) {
+    soloScenePresetEl.addEventListener("change", () => {
+      const k = soloScenePresetEl.value;
+      if (k) {
+        applySoloScenePreset(k);
+        soloScenePresetEl.value = "";
+      }
+    });
+  }
 
   const masterGainEl = document.getElementById("masterGain");
   if (masterGainEl) {
