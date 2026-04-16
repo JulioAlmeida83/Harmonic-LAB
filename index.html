@@ -26,11 +26,11 @@
       >Modo avançado</button>
       <button
         type="button"
-        id="btnAudio"
-        class="btn btn-primary"
-        title="Ligar/desligar o motor de áudio (atalho: Espaço)"
+        class="btn btn-primary btn-header-audio js-audio-toggle"
+        title="Ligar/desligar o motor de áudio (atalho: Espaço). O mesmo controlo está junto ao instrumento."
         aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
-      >Ativar áudio</button>
+aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
+      >Áudio</button>
       <button
         type="button"
         id="btnExport"
@@ -70,7 +70,17 @@
       <input type="hidden" id="soundMode" value="sample" />
     </div>
 
-    <div class="row row-instrument">
+    <div class="row row-instrument row-instrument-main">
+      <div class="field field-narrow field-audio-gate">
+        <span>Motor de áudio</span>
+        <button
+          type="button"
+          id="btnAudio"
+          class="btn btn-primary js-audio-toggle"
+          title="Ligar/desligar o motor de áudio (atalho: Espaço). Necessário para ouvir instrumento, harmonia, slots e escala."
+          aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
+        >Ativar áudio</button>
+      </div>
       <label class="field field-wide">
         <span>Instrumento (banco)</span>
         <select id="bankInstrument" disabled title="Disponível quando o áudio está ativo">
@@ -248,6 +258,14 @@
           />
         </label>
       </div>
+      <div class="subgroup-actions subgroup-actions-harmony is-advanced">
+        <span class="subgroup-actions-label">Rápido</span>
+        <button
+          type="button"
+          class="btn btn-compact js-harmony-off"
+          title="Desliga a harmonia estática (equivale a «Harmonia base: Desligada»). Não desliga a sequência de acordes."
+        >Desligar harmonia</button>
+      </div>
     </fieldset>
 
     <fieldset class="subgroup subgroup-bass">
@@ -361,19 +379,33 @@
         </label>
       </div>
     </div>
+    <div class="prog-actions prog-actions-top" role="toolbar" aria-label="Editor da sequência — acções rápidas">
+      <button
+        type="button"
+        class="btn btn-compact js-prog-add"
+        title="Adiciona um novo acorde ao final da sequência"
+        aria-label="Adicionar acorde à sequência"
+      >+ Acorde</button>
+      <button
+        type="button"
+        class="btn btn-compact btn-outline-stop js-prog-clear"
+        title="Remove todos os acordes da sequência"
+        aria-label="Limpar sequência de acordes"
+      >Limpar</button>
+    </div>
     <div id="progStepsEditor" class="prog-steps" role="list"></div>
-    <div class="prog-actions">
+    <div class="prog-actions prog-actions-bottom">
       <button
         type="button"
         id="progAddStep"
-        class="btn"
+        class="btn js-prog-add"
         title="Adiciona um novo acorde ao final da sequência"
         aria-label="Adicionar acorde à sequência"
       >+ Acorde</button>
       <button
         type="button"
         id="progClear"
-        class="btn"
+        class="btn btn-outline-stop js-prog-clear"
         title="Remove todos os acordes da sequência"
         aria-label="Limpar sequência de acordes"
       >Limpar</button>
@@ -381,8 +413,22 @@
     </div>
   </section>
 
-  <section class="panel" aria-label="Referência de graus">
-    <h2>Graus diatônicos (vs tônica, 1–22)</h2>
+  <section class="panel panel-degree-ref" aria-label="Referência de graus">
+    <div class="degree-ref-head">
+      <h2>Graus diatônicos (vs tônica, 1–22)</h2>
+      <div class="degree-ref-transport" role="group" aria-label="Tocar a escala configurada em «Escala completa»">
+        <button
+          type="button"
+          class="btn btn-primary btn-sm js-scale-play"
+          title="Toca a sequência da escala (ritmo, direção e oitavas da secção Escala completa)"
+        >▶ Tocar escala</button>
+        <button
+          type="button"
+          class="btn btn-outline-stop btn-sm js-scale-stop"
+          title="Interrompe a execução da escala"
+        >■ Parar</button>
+      </div>
+    </div>
     <div id="scaleMeta" class="scale-meta" aria-live="polite"></div>
     <div id="degreeStrip" class="degree-strip"></div>
   </section>
@@ -413,7 +459,7 @@
         <button
           type="button"
           id="btnMuteAll"
-          class="btn"
+          class="btn btn-outline-stop js-slots-mute-all"
           title="Desativa todos os 8 slots de uma só vez"
           aria-label="Mutar todos os slots"
         >Mutar slots</button>
@@ -433,6 +479,14 @@
     </div>
     <div id="slotChordVoicing" class="slots-chord" aria-live="polite"></div>
     <div id="slotMissingNotes" class="slots-missing"></div>
+    <div class="slots-toolbar" role="toolbar" aria-label="Acções dos slots junto à grelha">
+      <button
+        type="button"
+        class="btn btn-outline-stop btn-compact js-slots-mute-all"
+        title="Desativa todos os 8 slots (o mesmo que em cima)"
+        aria-label="Mutar todos os slots"
+      >Mutar todos</button>
+    </div>
     <div id="slots" class="slots"></div>
   </section>
 
@@ -497,12 +551,48 @@
   </section>
 
   <section class="panel panel-scale-player" aria-label="Tocar escala">
-    <h2>Escala completa</h2>
+    <div class="scale-player-head">
+      <h2>Escala completa</h2>
+      <div class="scale-player-head-transport" role="group" aria-label="Transporte da escala">
+        <button
+          type="button"
+          class="btn btn-primary btn-compact js-scale-play"
+          title="Toca a escala com o ritmo e direção configurados abaixo"
+          aria-label="Tocar escala completa"
+        >▶ Tocar</button>
+        <button
+          type="button"
+          class="btn btn-outline-stop btn-compact js-scale-stop"
+          title="Interrompe a execução da escala"
+          aria-label="Parar escala"
+        >■</button>
+      </div>
+    </div>
     <div class="row row-scale-exec">
-      <label class="field field-wide field-hero">
-        <span>Escala (execução) <small class="hint-stars" title="Estrelas indicam quão bem cada escala casa com o acorde da harmonia base selecionada. ★★★ cobre o acorde sem avoid notes; ★★ tem 1 avoid; ★ tem 2+ ou falta 1 nota; sem estrela = choque real.">★★★ = combina com o acorde</small></span>
-        <select id="scaleType" title="Escala usada na sequência, na faixa de graus, nos slots e na harmonia"></select>
-      </label>
+      <div class="field field-wide field-hero field-hero-scale">
+        <div class="field-hero-scale-title">Escala (execução) <small class="hint-stars" title="Estrelas indicam quão bem cada escala casa com o acorde da harmonia base selecionada. ★★★ cobre o acorde sem avoid notes; ★★ tem 1 avoid; ★ tem 2+ ou falta 1 nota; sem estrela = choque real.">★★★ = combina com o acorde</small></div>
+        <div class="field-hero-scale-row">
+          <select
+            id="scaleType"
+            class="select-scale-grow"
+            title="Escala usada na sequência, na faixa de graus, nos slots e na harmonia"
+          ></select>
+          <div class="scale-select-transport" role="group" aria-label="Tocar ou parar nesta escala">
+            <button
+              type="button"
+              class="btn btn-primary btn-icon-tight js-scale-play"
+              title="Toca a escala (mesmo que ▶ Tocar escala)"
+              aria-label="Tocar escala"
+            >▶</button>
+            <button
+              type="button"
+              class="btn btn-outline-stop btn-icon-tight js-scale-stop"
+              title="Parar escala"
+              aria-label="Parar escala"
+            >■</button>
+          </div>
+        </div>
+      </div>
       <label class="field">
         <span>Direção</span>
         <select id="seqDir" title="Direção da escala. 'Alternar no loop' inverte a direção a cada repetição.">
@@ -581,14 +671,14 @@
       <button
         type="button"
         id="btnPlayScale"
-        class="btn btn-primary btn-hero"
+        class="btn btn-primary btn-hero js-scale-play"
         title="Toca a escala completa com o ritmo e direção configurados"
         aria-label="Tocar escala completa"
       >▶ Tocar escala</button>
       <button
         type="button"
         id="btnStopScale"
-        class="btn"
+        class="btn btn-outline-stop js-scale-stop"
         title="Interrompe a execução da escala"
         aria-label="Parar execução da escala"
       >■ Parar</button>

@@ -3128,8 +3128,14 @@ function progRefreshCifras() {
  *   - a cada mudança de compasso dentro do step (para o contador X/Y);
  *   - ao (re)renderizar o editor (para restaurar o highlight);
  *   - ao ligar o áudio (via `progResetPlayhead`).
+ *
+ * @param {{ scrollActiveStep?: boolean }} [opts]
+ *   `scrollActiveStep` — só deve ser `true` quando o playhead da progressão
+ *   avança para um **novo** step; nunca ao mudar tônica/escala no painel
+ *   (evita `scrollIntoView` a puxar a página para longe do sítio onde o user está).
  */
-function progRenderStatus() {
+function progRenderStatus(opts = {}) {
+  const scrollActiveStep = opts.scrollActiveStep === true;
   const now = document.getElementById("progNowPlaying");
   if (!now) return;
   if (!progState.enabled || !progState.resolved.length) {
@@ -3170,12 +3176,17 @@ function progRenderStatus() {
         delete row.dataset.barTotal;
       }
     });
-    // Rola o step ativo para ficar visível em progressões longas (sem
-    // animação abrupta: scrollIntoView default já é suave quando o
-    // utilizador tem 'prefers-reduced-motion' desativado).
-    if (activeRow && typeof activeRow.scrollIntoView === "function") {
+    if (scrollActiveStep && activeRow && typeof activeRow.scrollIntoView === "function") {
       try {
-        activeRow.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+        const reduceMotion =
+          typeof window !== "undefined" &&
+          window.matchMedia &&
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        activeRow.scrollIntoView({
+          behavior: reduceMotion ? "auto" : "smooth",
+          block: "nearest",
+          inline: "nearest",
+        });
       } catch {
         /* browsers antigos: ignora */
       }
@@ -3265,7 +3276,9 @@ function progTickBeat() {
     progState.lastBarIndex = barIdx;
     // Atualiza status em cada mudança de compasso para dar feedback visual
     // ao vivo em acordes que duram múltiplos compassos (ex.: blues de 12).
-    progRenderStatus();
+    // Só rola o DOM quando o **step** muda (mudança de compasso no mesmo acorde
+    // não deve puxar o scroll — menos ruído visual).
+    progRenderStatus({ scrollActiveStep: stepChanged });
   }
 }
 
@@ -3315,9 +3328,9 @@ function wireProgressionControls() {
   const preset = document.getElementById("progPreset");
   const auto = document.getElementById("progAutoScale");
   const applyScale = document.getElementById("progApplyScale");
-  const addBtn = document.getElementById("progAddStep");
-  const clearBtn = document.getElementById("progClear");
-  if (!enabled || !preset || !addBtn || !clearBtn) return;
+  const addBtns = document.querySelectorAll(".js-prog-add");
+  const clearBtns = document.querySelectorAll(".js-prog-clear");
+  if (!enabled || !preset || addBtns.length === 0 || clearBtns.length === 0) return;
 
   progPopulatePresets();
 
@@ -3354,7 +3367,7 @@ function wireProgressionControls() {
     }
   });
 
-  addBtn.addEventListener("click", () => {
+  const onProgAdd = () => {
     const editor = document.getElementById("progStepsEditor");
     if (!editor) return;
     const rows = editor.querySelectorAll(".prog-step");
@@ -3363,33 +3376,39 @@ function wireProgressionControls() {
     progResolveFromUI();
     progRefreshCifras();
     progRenderStatus();
-  });
+  };
 
-  clearBtn.addEventListener("click", () => {
+  const onProgClear = () => {
     const editor = document.getElementById("progStepsEditor");
     if (editor) editor.innerHTML = "";
     progState.steps = [];
     progState.resolved = [];
     progRenderStatus();
-  });
+  };
+
+  addBtns.forEach((b) => b.addEventListener("click", onProgAdd));
+  clearBtns.forEach((b) => b.addEventListener("click", onProgClear));
 }
 
 function wireGlobalControls() {
-  const btnAudio = document.getElementById("btnAudio");
+  const audioToggles = document.querySelectorAll(".js-audio-toggle");
 
   function setAudioButtonState(state) {
     // state: false | true | "loading"
-    btnAudio.classList.toggle("btn-primary", state === true || state === "loading");
-    btnAudio.classList.toggle("is-loading", state === "loading");
-    if (state === "loading") {
-      btnAudio.textContent = "A carregar amostras…";
-      btnAudio.setAttribute("aria-pressed", "true");
-      btnAudio.setAttribute("aria-busy", "true");
-    } else {
-      btnAudio.textContent = state ? "Desativar áudio" : "Ativar áudio";
-      btnAudio.setAttribute("aria-pressed", state ? "true" : "false");
-      btnAudio.setAttribute("aria-busy", "false");
-    }
+    audioToggles.forEach((btnAudio) => {
+      const isHeader = btnAudio.classList.contains("btn-header-audio");
+      btnAudio.classList.toggle("btn-primary", state === true || state === "loading");
+      btnAudio.classList.toggle("is-loading", state === "loading");
+      if (state === "loading") {
+        btnAudio.textContent = isHeader ? "…" : "A carregar amostras…";
+        btnAudio.setAttribute("aria-pressed", "true");
+        btnAudio.setAttribute("aria-busy", "true");
+      } else {
+        btnAudio.textContent = isHeader ? "Áudio" : state ? "Desativar áudio" : "Ativar áudio";
+        btnAudio.setAttribute("aria-pressed", state ? "true" : "false");
+        btnAudio.setAttribute("aria-busy", "false");
+      }
+    });
   }
 
   async function toggleAudio() {
@@ -3452,7 +3471,11 @@ function wireGlobalControls() {
     setAudioButtonState(false);
   }
 
-  btnAudio.addEventListener("click", toggleAudio);
+  audioToggles.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      void toggleAudio();
+    });
+  });
 
   // Export MP3 — abre dialog; dentro, o user escolhe modo e inicia.
   const btnExport = document.getElementById("btnExport");
@@ -3630,6 +3653,15 @@ function wireGlobalControls() {
       }
     });
   }
+
+  document.querySelectorAll(".js-harmony-off").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const sel = document.getElementById("harmonyBase");
+      if (!sel || sel.value === "off") return;
+      sel.value = "off";
+      sel.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  });
   const droneOnEl = document.getElementById("droneOn");
   if (droneOnEl) {
     droneOnEl.addEventListener("change", () => {
@@ -3713,7 +3745,7 @@ function wireGlobalControls() {
     el.addEventListener("input", () => updateSliderValueLabel(el));
   });
 
-  document.getElementById("btnMuteAll").addEventListener("click", () => {
+  const onMuteAllSlots = () => {
     document.querySelectorAll('.slot input[type="checkbox"]').forEach((c) => {
       c.checked = false;
     });
@@ -3734,7 +3766,8 @@ function wireGlobalControls() {
     }
     scheduleSyncAudio();
     refreshSampleExecutionLoop();
-  });
+  };
+  document.querySelectorAll(".js-slots-mute-all").forEach((b) => b.addEventListener("click", onMuteAllSlots));
 
   /** Dispara a escala uma vez e, se `loop` está ligado, reagenda até ao utilizador parar. */
   async function runScaleOnce(myToken, iteration = 0) {
@@ -3854,13 +3887,13 @@ function wireGlobalControls() {
     clearScaleHighlights();
   }
 
-  document.getElementById("btnPlayScale").addEventListener("click", () => {
+  const onScalePlay = () => {
     stopScaleLoop();
     scaleLoopToken += 1;
     void runScaleOnce(scaleLoopToken);
-  });
+  };
 
-  document.getElementById("btnStopScale").addEventListener("click", () => {
+  const onScaleStop = () => {
     stopScaleLoop();
     // Modo synth: silencia seqGain. Modo sample: NÃO silencia scaleSampleBus
     // porque é partilhado com drone/slots/bass — zerá-lo calaria tudo.
@@ -3872,7 +3905,11 @@ function wireGlobalControls() {
     //   - stopSamplerVoices(): corte global apagaria vozes da harmonia em
     //     harmStabBus. Notas de escala já despachadas decaem naturalmente
     //     (≤0.3s em pluck, até ~1.5s em sustain) — preço aceitável.
-  });
+  };
+
+  document.querySelectorAll(".js-scale-play").forEach((b) => b.addEventListener("click", onScalePlay));
+  document.querySelectorAll(".js-scale-stop").forEach((b) => b.addEventListener("click", onScaleStop));
+
 
   // Se o utilizador desliga o loop enquanto já está a correr, cancela o reagendamento
   // e limpa os highlights visuais agendados para a próxima iteração.
