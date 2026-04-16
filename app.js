@@ -972,6 +972,8 @@ let sampleSlotsArpIndex = 0;
 let sampleBassPatIndex = 0;
 let soloPatIndex = 0;
 let lastSoloChordSig = "";
+/** Assinatura do último acorde desenhado na faixa «ouvir harmonia». */
+let lastHarmHearStripSig = "";
 /** Token / timer do loop da escala (cada «Tocar» incrementa o token). */
 let scaleLoopToken = 0;
 let scaleLoopTimer = null;
@@ -980,6 +982,64 @@ let scaleLoopTimer = null;
 const scaleHighlightTimers = [];
 /** Highlights da faixa de notas da sequência (sincronizados com o áudio). */
 const seqStripHighlightTimers = [];
+/** Highlights da faixa de notas da harmonia (por batida do loop de amostras). */
+const harmonyHearTimers = [];
+
+function clearHarmonyHearTimers() {
+  for (const tm of harmonyHearTimers) clearTimeout(tm);
+  harmonyHearTimers.length = 0;
+}
+
+function clearHarmonyHearVisuals() {
+  clearHarmonyHearTimers();
+  const host = document.getElementById("harmHearStrip");
+  if (host) host.innerHTML = "";
+}
+
+function renderHarmonyHearPillsFromMidis(midis) {
+  const host = document.getElementById("harmHearStrip");
+  if (!host) return;
+  if (!midis.length) {
+    host.innerHTML = "";
+    return;
+  }
+  const pf = preferFlats();
+  const uniq = [...new Set(midis)].sort((a, b) => a - b);
+  host.innerHTML = "";
+  for (const m of uniq) {
+    const pill = document.createElement("span");
+    pill.className = "harm-hear-pill";
+    pill.setAttribute("role", "listitem");
+    pill.dataset.midi = String(m);
+    pill.textContent = midiNoteLabel(m, pf);
+    host.appendChild(pill);
+  }
+}
+
+/**
+ * Destaca cada nota da harmonia no instante em que o sampler a toca.
+ * `t0Abs` = instante absoluto do AudioContext do início da batida (o mesmo `t`
+ * usado em `playNoteAt` no `step()`).
+ */
+function scheduleHarmonyHearHighlights(t0Abs, events, ctxNow) {
+  if (!events.length) return;
+  for (const ev of events) {
+    const midi = ev.midi;
+    if (typeof midi !== "number") continue;
+    const startMs = Math.max(0, Math.round((t0Abs + ev.offset - ctxNow) * 1000));
+    const endMs = Math.max(startMs + 45, Math.round(startMs + (ev.dur || 0.12) * 1000));
+    harmonyHearTimers.push(
+      setTimeout(() => {
+        document.querySelector(`#harmHearStrip .harm-hear-pill[data-midi="${midi}"]`)?.classList.add("is-current");
+      }, startMs),
+    );
+    harmonyHearTimers.push(
+      setTimeout(() => {
+        document.querySelector(`#harmHearStrip .harm-hear-pill[data-midi="${midi}"]`)?.classList.remove("is-current");
+      }, endMs),
+    );
+  }
+}
 
 function clearScaleSeqStripUi() {
   for (const t of seqStripHighlightTimers) clearTimeout(t);
@@ -1243,6 +1303,10 @@ function stopSampleExecutionLoop() {
   sampleBassPatIndex = 0;
   soloPatIndex = 0;
   lastSoloChordSig = "";
+  lastHarmHearStripSig = "";
+  clearHarmonyHearVisuals();
+  const soloLnStop = document.getElementById("soloHearLine");
+  if (soloLnStop) soloLnStop.textContent = "";
 }
 
 // ---------------------------------------------------------------------------
@@ -1980,6 +2044,13 @@ function refreshSampleExecutionLoop() {
       lastHarmSig = sig;
       lastHarmStyle = harmonyStyle;
 
+      const ctxNowUi = audio.ctx.currentTime;
+      if (sig !== lastHarmHearStripSig) {
+        lastHarmHearStripSig = sig;
+        renderHarmonyHearPillsFromMidis(harmMidis);
+      }
+      clearHarmonyHearTimers();
+      const harmHearEvents = [];
       executeHarmonyPattern({
         styleKey: harmonyStyle,
         chord: harmMidis,
@@ -1987,14 +2058,19 @@ function refreshSampleExecutionLoop() {
         absBeat,
         peak,
         schedule: ({ midi, offset, dur, style, velMult }) => {
+          harmHearEvents.push({ midi, offset, dur });
           const p = Math.max(0.012, Math.min(perNoteCap, peak * (velMult ?? 1)));
           audio.instrumentSampler.playNoteAt(audio.harmStabBus, midi, t + offset, p, dur, style);
         },
       });
+      scheduleHarmonyHearHighlights(t, harmHearEvents, ctxNowUi);
       // Mantém compatibilidade com o antigo contador de "arpeggio": alguns
       // pontos do UI ainda podem lê-lo, e é barato atualizar.
       if (harmonyStyle === "arpeggio") sampleHarmonyArpIndex += 1;
       sampleHarmonyBeatIndex += 1;
+    } else {
+      lastHarmHearStripSig = "";
+      clearHarmonyHearVisuals();
     }
 
     // Linha de baixo (pode usar harmonia ou só I se «harmonia desligada»)
@@ -2110,17 +2186,29 @@ function refreshSampleExecutionLoop() {
         }
 
         const { offsets, durs } = soloRhythmOffsets(soloRhythm, beat, sampleHarmonyBeatIndex % 4);
+        const soloHear = document.getElementById("soloHearLine");
         if (offsets.length > 0) {
           const degrees = generateSoloDegrees(soloPattern, chord.intervals, scaleIvals, soloPatIndex, offsets.length);
           soloPatIndex += offsets.length;
           const peak = Math.max(0.04, Math.min(0.2, soloVol * 0.18));
+          const pfSolo = preferFlats();
+          const soloBits = [];
           for (let i = 0; i < degrees.length; i += 1) {
             const semitones = degrees[i];
             const midi = clampMidi(12 * (soloOct + 1) + chord.rootPc + semitones, 24, 96);
+            soloBits.push(midiNoteLabel(midi, pfSolo));
             audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t + offsets[i], peak, durs[i]);
           }
+          if (soloHear) {
+            soloHear.textContent = soloBits.length ? `Solo (esta batida): ${soloBits.join(" · ")}` : "";
+          }
+        } else if (soloHear) {
+          soloHear.textContent = "";
         }
       }
+    } else {
+      const sl = document.getElementById("soloHearLine");
+      if (sl) sl.textContent = "";
     }
   };
 
@@ -3129,13 +3217,10 @@ function progRefreshCifras() {
  *   - ao (re)renderizar o editor (para restaurar o highlight);
  *   - ao ligar o áudio (via `progResetPlayhead`).
  *
- * @param {{ scrollActiveStep?: boolean }} [opts]
- *   `scrollActiveStep` — só deve ser `true` quando o playhead da progressão
- *   avança para um **novo** step; nunca ao mudar tônica/escala no painel
- *   (evita `scrollIntoView` a puxar a página para longe do sítio onde o user está).
+ * Não usa `scrollIntoView`: manter o scroll estável evita saltar para o painel
+ * da progressão enquanto o utilizador lê graus / harmonia / slots.
  */
-function progRenderStatus(opts = {}) {
-  const scrollActiveStep = opts.scrollActiveStep === true;
+function progRenderStatus() {
   const now = document.getElementById("progNowPlaying");
   if (!now) return;
   if (!progState.enabled || !progState.resolved.length) {
@@ -3176,21 +3261,6 @@ function progRenderStatus(opts = {}) {
         delete row.dataset.barTotal;
       }
     });
-    if (scrollActiveStep && activeRow && typeof activeRow.scrollIntoView === "function") {
-      try {
-        const reduceMotion =
-          typeof window !== "undefined" &&
-          window.matchMedia &&
-          window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        activeRow.scrollIntoView({
-          behavior: reduceMotion ? "auto" : "smooth",
-          block: "nearest",
-          inline: "nearest",
-        });
-      } catch {
-        /* browsers antigos: ignora */
-      }
-    }
   }
 }
 
@@ -3276,9 +3346,7 @@ function progTickBeat() {
     progState.lastBarIndex = barIdx;
     // Atualiza status em cada mudança de compasso para dar feedback visual
     // ao vivo em acordes que duram múltiplos compassos (ex.: blues de 12).
-    // Só rola o DOM quando o **step** muda (mudança de compasso no mesmo acorde
-    // não deve puxar o scroll — menos ruído visual).
-    progRenderStatus({ scrollActiveStep: stepChanged });
+    progRenderStatus();
   }
 }
 
@@ -3701,6 +3769,57 @@ function wireGlobalControls() {
     if (el) el.addEventListener("input", onContextChange);
   });
 
+  function syncSoloTransportUi() {
+    const chk = document.getElementById("soloEnabled");
+    if (!chk) return;
+    const on = chk.checked;
+    document.querySelectorAll(".js-solo-play").forEach((b) => b.setAttribute("aria-pressed", on ? "true" : "false"));
+  }
+
+  const onSoloPlay = () => {
+    if (!audioUserEnabled) {
+      alert("Ligue o motor de áudio primeiro (Ativar áudio).");
+      return;
+    }
+    const soundMode = document.getElementById("soundMode")?.value ?? "synth";
+    if (soundMode !== "sample" || !audio.instrumentSampler) {
+      alert("O solo improvisado usa o banco de amostras. Confirme o modo Instrumento e que o áudio está activo.");
+      return;
+    }
+    if (!progState.enabled || !progState.resolved.length) {
+      alert(
+        "Active «Ativar sequência» na secção Sequência de acordes e defina (ou carregue) pelo menos um passo — o solo segue a progressão.",
+      );
+      return;
+    }
+    const chk = document.getElementById("soloEnabled");
+    if (!chk) return;
+    if (!chk.checked) {
+      chk.checked = true;
+      chk.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    // Sempre reinicia a frase melódica ao premir «Tocar solo / improvisação» (útil se já estava ligado).
+    soloPatIndex = 0;
+    lastSoloChordSig = "";
+    refreshSampleExecutionLoop();
+    syncSoloTransportUi();
+  };
+
+  const onSoloStop = () => {
+    const chk = document.getElementById("soloEnabled");
+    if (chk?.checked) {
+      chk.checked = false;
+      chk.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    refreshSampleExecutionLoop();
+    syncSoloTransportUi();
+  };
+
+  document.querySelectorAll(".js-solo-play").forEach((b) => b.addEventListener("click", onSoloPlay));
+  document.querySelectorAll(".js-solo-stop").forEach((b) => b.addEventListener("click", onSoloStop));
+  const soloEnabledEl = document.getElementById("soloEnabled");
+  if (soloEnabledEl) soloEnabledEl.addEventListener("change", syncSoloTransportUi);
+
   const masterGainEl = document.getElementById("masterGain");
   if (masterGainEl) {
     masterGainEl.addEventListener("input", () => {
@@ -3937,6 +4056,7 @@ function wireGlobalControls() {
 
   setAudioButtonState(false);
   syncTonicSoundButton();
+  syncSoloTransportUi();
   updateSampleControlsEnabled();
 }
 

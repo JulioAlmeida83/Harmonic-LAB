@@ -2243,6 +2243,238 @@ const SOLO_PATTERNS = {
     }
     return r;
   },
+  /** Digital 3-2-1-5 (descendente + quinta). */
+  digital_3215(_ci, si, idx, n) {
+    const pat = [2, 1, 0, 4];
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const group = Math.floor((idx + i) / pat.length);
+      const inPat = (idx + i) % pat.length;
+      const base = group % si.length;
+      let acc = base + pat[inPat];
+      const oct = Math.floor(acc / si.length);
+      acc = ((acc % si.length) + si.length) % si.length;
+      r.push(si[acc] + 12 * oct);
+    }
+    return r;
+  },
+  /** 1-3-5-7 só com alturas do acorde (ordem clássica). */
+  chord_degrees_1357(ci, _si, idx, n) {
+    const pick = (semitone) => {
+      const hit = ci.find((x) => x === semitone);
+      return hit != null ? hit : null;
+    };
+    const raw = [pick(0) ?? 0, pick(3) ?? pick(4), pick(5) ?? pick(7), pick(10) ?? pick(11)];
+    const seq = raw.filter((x) => x != null);
+    if (!seq.length) return SOLO_PATTERNS.arp_up(ci, _si, idx, n);
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const p = (idx + i) % seq.length;
+      const oct = Math.floor((idx + i) / seq.length);
+      r.push(seq[p] + 12 * oct);
+    }
+    return r;
+  },
+  /** Arpejo em ordem “aberta”: R–5–3–7 (ou equivalente com menos notas). */
+  arp_spread(ci, _si, idx, n) {
+    const order =
+      ci.length >= 4 ? [0, 2, 1, 3] : ci.length === 3 ? [0, 2, 1] : ci.map((_, k) => k);
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const k = (idx + i) % order.length;
+      const oct = Math.floor((idx + i) / order.length);
+      const degIdx = order[k];
+      r.push(ci[degIdx % ci.length] + 12 * oct);
+    }
+    return r;
+  },
+  /** Alterna 3ª e 7ª do acorde (guide tones). */
+  guide_37(ci, _si, idx, n) {
+    const third = ci.find((x) => x === 3 || x === 4) ?? ci[1] ?? 4;
+    const seventh = ci.find((x) => x === 10 || x === 11) ?? ci[Math.min(3, ci.length - 1)] ?? 10;
+    const seq = [third, seventh];
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      r.push(seq[(idx + i) % 2] + 12 * Math.floor((idx + i) / 2));
+    }
+    return r;
+  },
+  /** Shell reduzido: só 3ª e 7ª em alternância com a fundamental. */
+  shell_r357(ci, _si, idx, n) {
+    const r0 = ci[0] ?? 0;
+    const third = ci.find((x) => x === 3 || x === 4) ?? 4;
+    const seventh = ci.find((x) => x === 10 || x === 11) ?? 10;
+    const cycle = [r0, third, seventh];
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      r.push(cycle[(idx + i) % 3] + 12 * Math.floor((idx + i) / 3));
+    }
+    return r;
+  },
+  /** Quarta / quinta na escala: salta de 3 em 3 graus (som quartal). */
+  quart_stack(_ci, si, idx, n) {
+    const step = 3;
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const total = idx + i;
+      const acc = total * step;
+      const deg = ((acc % si.length) + si.length) % si.length;
+      const oct = Math.floor(acc / si.length);
+      r.push(si[deg] + 12 * oct);
+    }
+    return r;
+  },
+  /** Vizinho cromático por baixo alternando com nota da escala. */
+  chrom_neighbor_lo(_ci, si, idx, n) {
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const k = idx + i;
+      const step = Math.floor(k / 2);
+      const deg = step % si.length;
+      const oct = Math.floor(step / si.length);
+      if (k % 2 === 0) {
+        r.push(si[deg] + 12 * oct);
+      } else {
+        r.push(si[deg] - 1 + 12 * oct);
+      }
+    }
+    return r;
+  },
+  /** Escala saltando um grau (0,2,4,6… na escala). */
+  skip_scale(_ci, si, idx, n) {
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const acc = (idx + i) * 2;
+      const deg = acc % si.length;
+      const oct = Math.floor(acc / si.length);
+      r.push(si[deg] + 12 * oct);
+    }
+    return r;
+  },
+  /** Célula cromática curta a partir da fundamental do acorde. */
+  chrom_cell(ci, _si, idx, n) {
+    const base = ci[0] ?? 0;
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const k = idx + i;
+      const inCell = k % 5;
+      const oct = Math.floor(k / 5);
+      r.push(base + inCell + 12 * oct);
+    }
+    return r;
+  },
+  /** Approach por cima: meio-tom acima antes de cada nota do acorde. */
+  approach_hi(ci, _si, idx, n) {
+    const seq = [];
+    for (const ct of ci) {
+      seq.push(ct + 1);
+      seq.push(ct);
+    }
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const pos = (idx + i) % seq.length;
+      const oct = Math.floor((idx + i) / seq.length);
+      r.push(seq[pos] + 12 * oct);
+    }
+    return r;
+  },
+  /** Enclosure invertido: abaixo – acima – alvo. */
+  enclosure_lo_hi(ci, _si, idx, n) {
+    const seq = [];
+    for (const ct of ci) {
+      seq.push(ct - 1);
+      seq.push(ct + 1);
+      seq.push(ct);
+    }
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const pos = (idx + i) % seq.length;
+      const oct = Math.floor((idx + i) / seq.length);
+      r.push(seq[pos] + 12 * oct);
+    }
+    return r;
+  },
+  /** Doble enclosure: ±2 semitons antes do alvo. */
+  enclosure_wide(ci, _si, idx, n) {
+    const seq = [];
+    for (const ct of ci) {
+      seq.push(ct - 2);
+      seq.push(ct + 2);
+      seq.push(ct);
+    }
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const pos = (idx + i) % seq.length;
+      const oct = Math.floor((idx + i) / seq.length);
+      r.push(seq[pos] + 12 * oct);
+    }
+    return r;
+  },
+  /** Alterna fundamental e trítono (cor de substituição). */
+  root_tritone(ci, _si, idx, n) {
+    const r0 = ci[0] ?? 0;
+    const seq = [r0, r0 + 6];
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      r.push(seq[(idx + i) % 2] + 12 * Math.floor((idx + i) / 2));
+    }
+    return r;
+  },
+  /** Power / quintas: raiz, quinta, oitava da quinta. */
+  power_fifth(ci, _si, idx, n) {
+    const r0 = ci[0] ?? 0;
+    const fifth = ci.find((x) => x === 5 || x === 7) ?? 7;
+    const seq = [r0, fifth, fifth + 12];
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      r.push(seq[(idx + i) % 3] + 12 * Math.floor((idx + i) / 3));
+    }
+    return r;
+  },
+  /** Side-slip: desloca meio-tom a cada 3 notas (clichê bebop). */
+  side_slip_scale(_ci, si, idx, n) {
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const slip = Math.floor((idx + i) / 3) % 2 === 1 ? 1 : 0;
+      const base = SOLO_PATTERNS.scale_up(_ci, si, idx + i, 1)[0];
+      r.push(base + slip);
+    }
+    return r;
+  },
+  /** Blues / blue: pentatónica com repetição do 3º grau (efeito “blue note”). */
+  pent_blue(_ci, si, idx, n) {
+    const pentIdx = si.length >= 7 ? [0, 1, 2, 4, 5] : [0, 1, 2, 3, 4];
+    const pentIvals = pentIdx.map((j) => si[j % si.length]);
+    const pattern = [0, 1, 2, 2, 3, 4];
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const k = idx + i;
+      const pi = pattern[k % pattern.length];
+      const q = Math.floor(k / pattern.length);
+      r.push(pentIvals[pi] + 12 * q);
+    }
+    return r;
+  },
+  /** Burst de tríade: só as três primeiras alturas do acorde em ciclo. */
+  triad_burst(ci, _si, idx, n) {
+    const tri = ci.length >= 3 ? [ci[0], ci[1], ci[2]] : ci.length ? [...ci] : [0, 4, 7];
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      r.push(tri[(idx + i) % tri.length] + 12 * Math.floor((idx + i) / tri.length));
+    }
+    return r;
+  },
+  /** Ondulação oitavas: mesma classe de altura alternando registo. */
+  octave_wave(ci, _si, idx, n) {
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const p = (idx + i) % ci.length;
+      const baseOct = Math.floor((idx + i) / ci.length);
+      const bump = (idx + i) % 2 === 1 ? 12 : 0;
+      r.push(ci[p] + 12 * baseOct + bump);
+    }
+    return r;
+  },
 };
 
 /**
@@ -2297,6 +2529,66 @@ const SOLO_RHYTHMS = {
   sixteenths(beat, _bib) {
     const s = beat / 4;
     return { offsets: [0, s, s * 2, s * 3], durs: [s * 0.8, s * 0.8, s * 0.8, s * 0.8] };
+  },
+  /** Shuffle / bounce: dois ataques desiguais (feel de oitavos swing). */
+  shuffle(beat, _bib) {
+    const a = beat * 0.33;
+    const b = beat * 0.34;
+    return { offsets: [0, a + b * 0.55], durs: [a * 0.88, (beat - a - b * 0.55) * 0.88] };
+  },
+  /** Colcheia ponto + semicolcheia (galopeca). */
+  gallop(beat, _bib) {
+    const d = beat * (3 / 8);
+    return { offsets: [0, d], durs: [d * 0.88, (beat - d) * 0.88] };
+  },
+  /** Tríade irregular: 1 e & de 3 (sincope dentro do tempo). */
+  synco_triplet(beat, _bib) {
+    const t = beat / 3;
+    return { offsets: [0, t + t / 2], durs: [t * 0.82, t * 0.82] };
+  },
+  /** Duas semicolcheias nos tempos fracos (e-of-2). */
+  offbeat_sixteenths(beat, _bib) {
+    const s = beat / 4;
+    return { offsets: [s * 2, s * 3], durs: [s * 0.78, s * 0.78] };
+  },
+  /** Três ataques: semínima pontuada + fusa (ritmo de 3+3+2 em semicolcheias). */
+  tresillo_332(beat, _bib) {
+    const s = beat / 8;
+    return { offsets: [0, s * 3, s * 6], durs: [s * 2.6 * 0.85, s * 2.6 * 0.85, s * 1.8 * 0.85] };
+  },
+  /** Primeiro ataque fantasma + segundo forte (ghost–accent). */
+  ghost_accent(beat, _bib) {
+    const g = beat * 0.06;
+    return { offsets: [g, beat * 0.38], durs: [g * 2.8, beat * 0.52] };
+  },
+  /** Clave 3-2 simplificada no compasso (4 batidas): padrão esparso. */
+  clave_three_two(beat, bib) {
+    if (bib === 0) return { offsets: [0], durs: [beat * 0.88] };
+    if (bib === 2) return { offsets: [beat * 0.5], durs: [beat * 0.42] };
+    if (bib === 3) return { offsets: [0], durs: [beat * 0.88] };
+    return { offsets: [], durs: [] };
+  },
+  /** Hemiólia: dois grupos de 3 dentro de 1 beat (sextinas). */
+  hemiola_six(beat, _bib) {
+    const s = beat / 6;
+    return {
+      offsets: [0, s * 3],
+      durs: [s * 2.4 * 0.85, s * 2.4 * 0.85],
+    };
+  },
+  /** Motivo de quatro colcheias com síncope na 3ª (1 — — 3). */
+  backbeat_eighths(beat, _bib) {
+    const h = beat / 2;
+    return { offsets: [0, h * 1.45], durs: [h * 0.82, h * 0.5] };
+  },
+  /** Roll rápido no fim do tempo (floreio). */
+  burst_end(beat, _bib) {
+    const s = beat / 5;
+    const start = beat * 0.55;
+    return {
+      offsets: [start, start + s, start + s * 2],
+      durs: [s * 0.75, s * 0.75, s * 0.75],
+    };
   },
 };
 

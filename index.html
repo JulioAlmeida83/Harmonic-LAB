@@ -377,6 +377,21 @@ aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
             aria-label="Volume da sequência de acordes"
           />
         </label>
+        <div class="prog-solo-transport" role="group" aria-label="Tocar ou parar o solo sobre esta sequência">
+          <span class="prog-solo-transport-label">Solo</span>
+          <button
+            type="button"
+            class="btn btn-primary btn-compact js-solo-play"
+            title="Liga o solo improvisado (requer sequência activa, áudio e modo amostra). Igual a «▶ Tocar solo / improvisação»."
+            aria-label="Tocar solo sobre a sequência"
+          >▶ Solo</button>
+          <button
+            type="button"
+            class="btn btn-outline-stop btn-compact js-solo-stop"
+            title="Para o solo. A sequência e a harmonia continuam."
+            aria-label="Parar solo"
+          >■</button>
+        </div>
       </div>
     </div>
     <div class="prog-actions prog-actions-top" role="toolbar" aria-label="Editor da sequência — acções rápidas">
@@ -409,28 +424,48 @@ aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
         title="Remove todos os acordes da sequência"
         aria-label="Limpar sequência de acordes"
       >Limpar</button>
-      <span id="progNowPlaying" class="prog-now" aria-live="polite"></span>
+      <span id="progNowPlaying" class="prog-now" aria-live="off" title="Estado da sequência (sem anúncio contínuo — evita a página acompanhar o foco visual)"></span>
     </div>
   </section>
 
   <section class="panel panel-degree-ref" aria-label="Referência de graus">
     <div class="degree-ref-head">
       <h2>Graus diatônicos (vs tônica, 1–22)</h2>
-      <div class="degree-ref-transport" role="group" aria-label="Tocar a escala configurada em «Escala completa»">
-        <button
-          type="button"
-          class="btn btn-primary btn-sm js-scale-play"
-          title="Toca a sequência da escala (ritmo, direção e oitavas da secção Escala completa)"
-        >▶ Tocar escala</button>
-        <button
-          type="button"
-          class="btn btn-outline-stop btn-sm js-scale-stop"
-          title="Interrompe a execução da escala"
-        >■ Parar</button>
+      <div class="degree-ref-transports">
+        <div class="degree-ref-transport" role="group" aria-label="Tocar a escala configurada em «Escala completa»">
+          <button
+            type="button"
+            class="btn btn-primary btn-sm js-scale-play"
+            title="Toca a sequência da escala (ritmo, direção e oitavas da secção Escala completa)"
+          >▶ Tocar escala</button>
+          <button
+            type="button"
+            class="btn btn-outline-stop btn-sm js-scale-stop"
+            title="Interrompe a execução da escala"
+          >■ Parar escala</button>
+        </div>
+        <div class="degree-ref-transport degree-ref-transport-solo" role="group" aria-label="Solo e improvisação sobre a sequência de acordes">
+          <button
+            type="button"
+            class="btn btn-primary btn-sm js-solo-play"
+            title="Liga o solo improvisado (igual ao painel Solo / Improvisação). Requer sequência activa, áudio e modo amostra."
+          >▶ Tocar solo / improvisação</button>
+          <button
+            type="button"
+            class="btn btn-outline-stop btn-sm js-solo-stop"
+            title="Para o solo. A harmonia, a escala e os slots continuam."
+          >■ Parar solo</button>
+        </div>
       </div>
     </div>
     <div id="scaleMeta" class="scale-meta" aria-live="polite"></div>
     <div id="degreeStrip" class="degree-strip"></div>
+    <div class="harm-hear-wrap is-advanced">
+      <div class="harm-hear-hint">
+        Harmonia — notas deste acorde; o sublinhado acompanha cada nota quando soa (sincronizado com o motor de amostras).
+      </div>
+      <div id="harmHearStrip" class="harm-hear-strip" role="list"></div>
+    </div>
   </section>
 
   <section class="panel" aria-label="Oito slots">
@@ -490,10 +525,26 @@ aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
     <div id="slots" class="slots"></div>
   </section>
 
-  <section class="panel panel-solo is-advanced" aria-label="Solo / Improvisação">
-    <h2>Solo / Improvisação</h2>
+  <section class="panel panel-solo" aria-label="Solo / Improvisação">
+    <div class="solo-head">
+      <h2>Solo / Improvisação</h2>
+      <div class="solo-head-transport" role="group" aria-label="Transporte do solo / improvisação">
+        <button
+          type="button"
+          class="btn btn-primary btn-compact js-solo-play"
+          title="Liga o solo (igual a marcar «Ativar solo»). Requer sequência de acordes activa e áudio em modo amostra."
+          aria-label="Tocar solo / improvisação"
+        >▶ Tocar solo / improvisação</button>
+        <button
+          type="button"
+          class="btn btn-outline-stop btn-compact js-solo-stop"
+          title="Para o solo (igual a desmarcar «Ativar solo»). A harmonia e os slots continuam."
+          aria-label="Parar solo"
+        >■ Parar solo</button>
+      </div>
+    </div>
     <p class="export-hint">Gera linhas melódicas sobre a progressão activa. Cada mudança de acorde adapta automaticamente as notas ao modo correspondente.</p>
-    <div class="row">
+    <div class="row row-solo-top">
       <label class="field field-check">
         <input type="checkbox" id="soloEnabled" />
         <span>Ativar solo</span>
@@ -501,35 +552,73 @@ aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
       <label class="field">
         <span>Padrão melódico</span>
         <select id="soloPattern">
-          <optgroup label="Arpejos">
+          <optgroup label="Arpejos e acorde">
             <option value="arp_up">Arpejo ascendente</option>
             <option value="arp_down">Arpejo descendente</option>
             <option value="arp_updown">Arpejo sobe/desce</option>
+            <option value="arp_spread">Arpejo aberto (R–5–3–7)</option>
+            <option value="chord_degrees_1357">Graus 1–3–5–7 do acorde</option>
+            <option value="triad_burst">Tríade em ciclo</option>
+            <option value="power_fifth">Power (raiz–quinta–quinta+8va)</option>
           </optgroup>
-          <optgroup label="Escalas">
+          <optgroup label="Escalas e intervalos">
             <option value="scale_up">Escala ascendente</option>
             <option value="scale_down">Escala descendente</option>
-            <option value="thirds">Em terças diatónicas</option>
-            <option value="pent">Pentatónica</option>
+            <option value="thirds">Terças diatónicas (alternadas)</option>
+            <option value="skip_scale">Escala saltando graus</option>
+            <option value="quart_stack">Quartas na escala (stack)</option>
+            <option value="pent">Pentatónica maior</option>
+            <option value="pent_blue">Pentatónica + blue note</option>
           </optgroup>
-          <optgroup label="Bebop / Jazz">
-            <option value="approach">Approach cromático</option>
-            <option value="enclosure">Enclosure</option>
-            <option value="digital_1235">1-2-3-5 (digital)</option>
+          <optgroup label="Cromático e approach">
+            <option value="approach">Approach por baixo (♭→natural)</option>
+            <option value="approach_hi">Approach por cima (♯→natural)</option>
+            <option value="chrom_cell">Célula cromática (4 notas)</option>
+            <option value="chrom_neighbor_lo">Vizinho cromático por baixo</option>
+            <option value="side_slip_scale">Side-slip (meio-tom a cada célula)</option>
+          </optgroup>
+          <optgroup label="Enclosure e guide tones">
+            <option value="enclosure">Enclosure (±1 → alvo)</option>
+            <option value="enclosure_lo_hi">Enclosure baixo–alto–alvo</option>
+            <option value="enclosure_wide">Enclosure largo (±2)</option>
+            <option value="guide_37">Guide tones (3ª e 7ª)</option>
+            <option value="shell_r357">Shell R–3–7</option>
+          </optgroup>
+          <optgroup label="Digital patterns e jazz">
+            <option value="digital_1235">Digital 1-2-3-5</option>
+            <option value="digital_3215">Digital 3-2-1-5</option>
+            <option value="root_tritone">Raiz e trítono</option>
+            <option value="octave_wave">Onda de oitavas no acorde</option>
           </optgroup>
         </select>
       </label>
       <label class="field">
         <span>Ritmo</span>
         <select id="soloRhythm">
-          <option value="quarters">Semínimas</option>
-          <option value="eighths">Colcheias</option>
-          <option value="swing" selected>Swing</option>
-          <option value="triplets">Tercinas</option>
-          <option value="bossa">Bossa nova</option>
-          <option value="charleston">Charleston</option>
-          <option value="syncopated">Sincopado</option>
-          <option value="sixteenths">Semicolcheias</option>
+          <optgroup label="Pulsos básicos">
+            <option value="quarters">Semínima (1 nota)</option>
+            <option value="eighths">Colcheias iguais</option>
+            <option value="swing" selected>Swing (shuffle longo–curto)</option>
+            <option value="shuffle">Shuffle / bounce</option>
+            <option value="triplets">Tercinas</option>
+            <option value="sixteenths">Semicolcheias (4)</option>
+          </optgroup>
+          <optgroup label="Latin e sincope">
+            <option value="bossa">Bossa (ponto + fraco)</option>
+            <option value="gallop">Galopeca (ponto + rápida)</option>
+            <option value="tresillo_332">Tresillo 3+3+2 (em 8)</option>
+            <option value="syncopated">Sincopado (e-de-1)</option>
+            <option value="synco_triplet">Sincope em tercina</option>
+            <option value="offbeat_sixteenths">Semicolcheias nos tempos fracos</option>
+            <option value="backbeat_eighths">Backbeat em colcheias</option>
+          </optgroup>
+          <optgroup label="Espaço e clave">
+            <option value="charleston">Charleston (compassos alternados)</option>
+            <option value="clave_three_two">Clave 3-2 (esparso)</option>
+            <option value="hemiola_six">Hemiólia (2×3 em 6)</option>
+            <option value="ghost_accent">Ghost + sotaque</option>
+            <option value="burst_end">Floreio no fim do tempo</option>
+          </optgroup>
         </select>
       </label>
       <label class="field field-compact">
@@ -548,6 +637,7 @@ aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
         />
       </label>
     </div>
+    <div id="soloHearLine" class="solo-hear-line" aria-live="off"></div>
   </section>
 
   <section class="panel panel-scale-player" aria-label="Tocar escala">

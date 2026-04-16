@@ -177,6 +177,59 @@ body.mode-simple .is-advanced {
   box-shadow: 0 0 0 1px rgba(108, 156, 255, 0.22);
 }
 
+.harm-hear-wrap {
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed var(--line);
+}
+
+.harm-hear-hint {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 0.5rem;
+  line-height: 1.35;
+  letter-spacing: 0.02em;
+}
+
+.harm-hear-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.harm-hear-pill {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  padding: 0.32rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  list-style: none;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    box-shadow 0.12s ease;
+}
+
+.harm-hear-pill.is-current {
+  border-color: rgba(108, 156, 255, 0.75);
+  background: rgba(108, 156, 255, 0.22);
+  box-shadow: 0 0 0 1px rgba(108, 156, 255, 0.25);
+}
+
+.solo-hear-line {
+  margin-top: 0.55rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--text);
+  line-height: 1.45;
+  min-height: 1.35em;
+}
+
 .row-instrument {
   margin-top: 0.85rem;
   padding-top: 0.85rem;
@@ -352,7 +405,8 @@ body.mode-simple .is-advanced {
 }
 
 .degree-ref-head,
-.scale-player-head {
+.scale-player-head,
+.solo-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -362,18 +416,51 @@ body.mode-simple .is-advanced {
 }
 
 .panel-degree-ref h2,
-.scale-player-head h2 {
+.scale-player-head h2,
+.solo-head h2 {
   margin: 0;
   flex: 1 1 auto;
   min-width: min(100%, 12rem);
 }
 
+.degree-ref-transports {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1.1rem;
+}
+
+.degree-ref-transport-solo {
+  padding-left: 0.85rem;
+  border-left: 1px solid var(--line);
+}
+
 .degree-ref-transport,
-.scale-player-head-transport {
+.scale-player-head-transport,
+.solo-head-transport {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
   align-items: center;
+}
+
+.prog-solo-transport {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.prog-solo-transport-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-right: 0.15rem;
 }
 
 .subgroup-actions-harmony {
@@ -1432,4 +1519,9 @@ body.mode-simple .panel-progression {
 /* Oculta options render quando em modo live */
 .export-dialog[data-mode="live"] [data-mode="render"] {
   display: none;
+}
+
+/* Solo — primeira linha de controlos alinha ao fundo dos campos */
+.row-solo-top {
+  align-items: flex-end;
 }
