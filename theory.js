@@ -2006,6 +2006,209 @@ function stepAtBar(resolvedSteps, barIndex) {
   return null;
 }
 
+// --- Solo / Improvisação — geradores de padrões de escala e ritmo -----------
+//
+// Dois blocos independentes:
+//   generateSoloDegrees(patternId, chordIvals, scaleIvals, startIdx, count)
+//     → semitons relativos à raíz do acorde (podem ser >12 = 8va acima).
+//   soloRhythmOffsets(rhythmId, beat, beatInBar)
+//     → { offsets: seconds[], durs: seconds[] } dentro de 1 beat.
+//
+// Ambos são puros (sem estado), stateless — o caller mantém `soloPatIndex`.
+// ---------------------------------------------------------------------------
+
+const SOLO_PATTERNS = {
+  /** Arpejo ascendente (chord tones, ciclo por oitavas). */
+  arp_up(ci, _si, idx, n) {
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const pos = (idx + i) % ci.length;
+      const oct = Math.floor((idx + i) / ci.length);
+      r.push(ci[pos] + 12 * oct);
+    }
+    return r;
+  },
+  /** Arpejo descendente. */
+  arp_down(ci, _si, idx, n) {
+    const rev = [...ci].reverse();
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const pos = (idx + i) % rev.length;
+      const oct = -Math.floor((idx + i) / rev.length);
+      r.push(rev[pos] + 12 * oct);
+    }
+    return r;
+  },
+  /** Arpejo sobe e desce (pingpong). */
+  arp_updown(ci, _si, idx, n) {
+    const cycle = [...ci, ...[...ci].reverse().slice(1, -1)];
+    if (!cycle.length) return Array(n).fill(0);
+    const r = [];
+    for (let i = 0; i < n; i++) r.push(cycle[(idx + i) % cycle.length]);
+    return r;
+  },
+  /** Escala ascendente (todos os graus). */
+  scale_up(_ci, si, idx, n) {
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const pos = (idx + i) % si.length;
+      const oct = Math.floor((idx + i) / si.length);
+      r.push(si[pos] + 12 * oct);
+    }
+    return r;
+  },
+  /** Escala descendente. */
+  scale_down(_ci, si, idx, n) {
+    const rev = [...si].reverse();
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const pos = (idx + i) % rev.length;
+      const oct = -Math.floor((idx + i) / rev.length);
+      r.push(rev[pos] + 12 * oct);
+    }
+    return r;
+  },
+  /** Em terças diatónicas (1-3, 2-4, 3-5, 4-6...). */
+  thirds(_ci, si, idx, n) {
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const base = Math.floor((idx + i) / 2);
+      const isThird = (idx + i) % 2 === 1;
+      const deg = base % si.length;
+      const oct = Math.floor(base / si.length);
+      if (isThird) {
+        const thirdDeg = (deg + 2) % si.length;
+        const thirdOct = oct + (deg + 2 >= si.length ? 1 : 0);
+        r.push(si[thirdDeg] + 12 * thirdOct);
+      } else {
+        r.push(si[deg] + 12 * oct);
+      }
+    }
+    return r;
+  },
+  /** Pentatónica (graus 1, 2, 3, 5, 6 da escala — ou os mais próximos). */
+  pent(_ci, si, idx, n) {
+    // Pega graus 0, 1, 2, 4, 5 da escala (pentatónica maior relativa)
+    const pentIdx = si.length >= 7 ? [0, 1, 2, 4, 5] : [0, 1, 2, 3, 4];
+    const pentIvals = pentIdx.map((i) => si[i % si.length]);
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const pos = (idx + i) % pentIvals.length;
+      const oct = Math.floor((idx + i) / pentIvals.length);
+      r.push(pentIvals[pos] + 12 * oct);
+    }
+    return r;
+  },
+  /** Approach cromático: meio-tom abaixo antes de cada chord tone. */
+  approach(ci, _si, idx, n) {
+    // Sequência: b1, 1, b3, 3, b5, 5, b7, 7, ...
+    const seq = [];
+    for (const ct of ci) { seq.push(ct - 1); seq.push(ct); }
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const pos = (idx + i) % seq.length;
+      const oct = Math.floor((idx + i) / seq.length);
+      r.push(seq[pos] + 12 * oct);
+    }
+    return r;
+  },
+  /** Enclosure: acima – abaixo – alvo, para cada chord tone. */
+  enclosure(ci, _si, idx, n) {
+    const seq = [];
+    for (const ct of ci) { seq.push(ct + 1); seq.push(ct - 1); seq.push(ct); }
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const pos = (idx + i) % seq.length;
+      const oct = Math.floor((idx + i) / seq.length);
+      r.push(seq[pos] + 12 * oct);
+    }
+    return r;
+  },
+  /** Digital pattern 1-2-3-5 (clássico jazz): cicla por graus da escala. */
+  digital_1235(_ci, si, idx, n) {
+    const pat = [0, 1, 2, 4]; // graus da escala (0-indexed)
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const group = Math.floor((idx + i) / pat.length);
+      const inPat = (idx + i) % pat.length;
+      const base = group % si.length;
+      const deg = (base + pat[inPat]) % si.length;
+      const oct = Math.floor((base + pat[inPat]) / si.length) + Math.floor(group / si.length);
+      r.push(si[deg] + 12 * oct);
+    }
+    return r;
+  },
+};
+
+/**
+ * Gera `count` semitons relativos à raíz do acorde, conforme o padrão pedido.
+ * @param {string} patternId
+ * @param {number[]} chordIntervals — ex.: [0, 3, 7, 10] para m7
+ * @param {number[]} scaleIntervals — ex.: [0, 2, 3, 5, 7, 9, 10] para dorian
+ * @param {number} startIndex — posição corrente no padrão (caller mantém)
+ * @param {number} count — quantas notas gerar
+ * @returns {number[]}
+ */
+function generateSoloDegrees(patternId, chordIntervals, scaleIntervals, startIndex, count) {
+  const fn = SOLO_PATTERNS[patternId] || SOLO_PATTERNS.arp_up;
+  const ci = chordIntervals && chordIntervals.length ? chordIntervals : [0, 4, 7];
+  const si = scaleIntervals && scaleIntervals.length ? scaleIntervals : [0, 2, 4, 5, 7, 9, 11];
+  return fn(ci, si, startIndex, count);
+}
+
+/** IDs exportáveis para a UI. */
+const SOLO_PATTERN_IDS = Object.keys(SOLO_PATTERNS);
+
+// Ritmos de solo — cada um devolve { offsets, durs } em segundos dentro de 1 beat.
+const SOLO_RHYTHMS = {
+  quarters(beat, _bib) {
+    return { offsets: [0], durs: [beat * 0.85] };
+  },
+  eighths(beat, _bib) {
+    const h = beat / 2;
+    return { offsets: [0, h], durs: [h * 0.85, h * 0.85] };
+  },
+  swing(beat, _bib) {
+    const on = beat * 0.67;
+    return { offsets: [0, on], durs: [on * 0.85, (beat - on) * 0.85] };
+  },
+  triplets(beat, _bib) {
+    const t = beat / 3;
+    return { offsets: [0, t, t * 2], durs: [t * 0.8, t * 0.8, t * 0.8] };
+  },
+  bossa(beat, _bib) {
+    const dot8 = beat * 0.75;
+    return { offsets: [0, dot8], durs: [dot8 * 0.85, (beat - dot8) * 0.85] };
+  },
+  charleston(beat, bib) {
+    // Toca em beats 0 e 2 (1º e 3º no compasso 4/4); silêncio em 1 e 3.
+    if (bib % 2 === 0) return { offsets: [0], durs: [beat * 0.85] };
+    return { offsets: [], durs: [] };
+  },
+  syncopated(beat, _bib) {
+    const q = beat / 4;
+    return { offsets: [q, q * 3], durs: [q * 2 * 0.8, q * 2 * 0.8] };
+  },
+  sixteenths(beat, _bib) {
+    const s = beat / 4;
+    return { offsets: [0, s, s * 2, s * 3], durs: [s * 0.8, s * 0.8, s * 0.8, s * 0.8] };
+  },
+};
+
+/**
+ * Devolve offsets e durações dentro de 1 beat para o ritmo de solo pedido.
+ * @param {string} rhythmId
+ * @param {number} beat — duração de 1 beat em segundos
+ * @param {number} beatInBar — 0–3 (posição no compasso 4/4)
+ * @returns {{ offsets: number[], durs: number[] }}
+ */
+function soloRhythmOffsets(rhythmId, beat, beatInBar) {
+  const fn = SOLO_RHYTHMS[rhythmId] || SOLO_RHYTHMS.quarters;
+  return fn(beat, beatInBar);
+}
+
+const SOLO_RHYTHM_IDS = Object.keys(SOLO_RHYTHMS);
+
 // --- Export dual-mode (browser globals + CommonJS) --------------------------
 
 (function (root, api) {
@@ -2076,4 +2279,9 @@ function stepAtBar(resolvedSteps, barIndex) {
   resolveSequenceStep,
   resolveSequence,
   stepAtBar,
+  // Solo / improvisação
+  SOLO_PATTERN_IDS,
+  SOLO_RHYTHM_IDS,
+  generateSoloDegrees,
+  soloRhythmOffsets,
 });
