@@ -1246,6 +1246,34 @@ input[type="checkbox"]:focus-visible {
   white-space: pre-line;
 }
 
+.slot-voicing-prefix {
+  font-size: 0.72rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.slot-voicing-note {
+  display: inline;
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.slot-voicing-note.note-reg-low {
+  color: rgba(170, 205, 255, 0.98);
+}
+
+.slot-voicing-note.note-reg-high {
+  color: rgba(255, 224, 168, 0.98);
+}
+
+.slot-voicing-instruction {
+  font-size: 0.74rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 .slots {
   display: flex;
   overflow-x: auto;

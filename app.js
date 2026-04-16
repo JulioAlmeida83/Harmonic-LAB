@@ -163,24 +163,28 @@ function dyadLabel(mLow, mHigh, preferFl) {
   return `${n0}–${n1} (${intDesc})`;
 }
 
-/** Analisa a combinação de MIDI dos slots ativos (mesma base que o áudio). */
+/**
+ * Analisa a combinação de MIDI dos slots ativos (mesma base que o áudio).
+ * @returns {{ head: string, voicingLine: null | { midis: number[], prefix: string }, instruction: string }}
+ */
 function describeActiveSlotsChord(midis, preferFl) {
   const sorted = [...new Set(midis)].sort((a, b) => a - b);
-  if (!sorted.length) return { head: "—", detail: "" };
+  if (!sorted.length) return { head: "—", voicingLine: null, instruction: "" };
   const pcs = [...new Set(sorted.map((m) => ((m % 12) + 12) % 12))].sort((a, b) => a - b);
   const bassPc = ((sorted[0] % 12) + 12) % 12;
-  const voicing = sorted.map((m) => midiNoteLabel(m, preferFl, "full")).join(" – ");
 
   if (pcs.length === 1) {
     return {
       head: `${midiNoteLabel(sorted[0], preferFl, "pitch")} (nota única)`,
-      detail: "Ative mais slots para formar intervalos ou acordes.",
+      voicingLine: null,
+      instruction: "Ative mais slots para formar intervalos ou acordes.",
     };
   }
   if (pcs.length === 2) {
     return {
       head: dyadLabel(sorted[0], sorted[sorted.length - 1], preferFl),
-      detail: "",
+      voicingLine: { midis: sorted, prefix: "Baixo → agudo" },
+      instruction: "",
     };
   }
 
@@ -188,14 +192,52 @@ function describeActiveSlotsChord(midis, preferFl) {
   if (sym) {
     return {
       head: sym,
-      detail: `Voicing (baixo → agudo): ${voicing}`,
+      voicingLine: { midis: sorted, prefix: "Voicing" },
+      instruction: "",
     };
   }
   const classes = pcs.map((p) => pcToName(p, preferFl)).join(" · ");
   return {
     head: `Sonoridade (${classes})`,
-    detail: `Registro real: ${voicing}`,
+    voicingLine: { midis: sorted, prefix: "Registro" },
+    instruction: "",
   };
+}
+
+/** Preenche `#slotChordVoicing`: texto curto + notas só em classe de altura e cor de registo. */
+function fillSlotChordVoicing(el, voicingLine, instruction, preferFl) {
+  if (!el) return;
+  el.replaceChildren();
+  const hasLine = voicingLine && Array.isArray(voicingLine.midis) && voicingLine.midis.length > 0;
+  const hasInstr = Boolean(instruction && String(instruction).trim());
+  if (!hasLine && !hasInstr) {
+    el.classList.add("slots-chord--empty");
+    return;
+  }
+  el.classList.remove("slots-chord--empty");
+  if (hasLine) {
+    const prefix = document.createElement("span");
+    prefix.className = "slot-voicing-prefix";
+    prefix.textContent = voicingLine.prefix ? `${voicingLine.prefix}: ` : "";
+    el.appendChild(prefix);
+    const ref = medianMidi(voicingLine.midis);
+    voicingLine.midis.forEach((m, i) => {
+      if (i > 0) el.appendChild(document.createTextNode(" · "));
+      const sp = document.createElement("span");
+      sp.className = "slot-voicing-note";
+      const reg = midiRegisterClass(m, ref);
+      if (reg) sp.classList.add(reg);
+      sp.textContent = midiNoteLabel(m, preferFl, "pitch");
+      el.appendChild(sp);
+    });
+  }
+  if (hasInstr) {
+    if (hasLine) el.appendChild(document.createElement("br"));
+    const t = document.createElement("span");
+    t.className = "slot-voicing-instruction";
+    t.textContent = instruction;
+    el.appendChild(t);
+  }
 }
 
 /**
@@ -203,8 +245,8 @@ function describeActiveSlotsChord(midis, preferFl) {
  * formado pela combinação atual. O header grande (`#slotsChordHeader`)
  * mostra o símbolo principal (ex.: "Cmaj7"); o subheader descreve o tipo
  * (Acorde/Intervalo/Nota) e lista as notas em classe; a linha inferior
- * (`#slotChordVoicing`) detalha o voicing registrado. Quando nenhum
- * slot está ativo, entra em estado "vazio" (placeholder discreto).
+ * (`#slotChordVoicing`) mostra o voicing com notas sem oitava e cor de registo.
+ * Quando nenhum slot está ativo, entra em estado "vazio" (placeholder discreto).
  */
 function updateSlotChordLabel() {
   const head = document.getElementById("slotsChordHeader");
@@ -236,7 +278,8 @@ function updateSlotChordLabel() {
   active.forEach((s) => {
     chordMidisFromSlotState(s, tcp, ivals, base).forEach((m) => midis.push(m));
   });
-  const { head: label, detail } = describeActiveSlotsChord(midis, pf);
+  const desc = describeActiveSlotsChord(midis, pf);
+  const label = desc.head;
   // Classes únicas presentes (pc) para distinguir nota/intervalo/acorde.
   const pcs = [...new Set(midis.map((m) => ((m % 12) + 12) % 12))].sort((a, b) => a - b);
   const kind = pcs.length >= 3 ? "Acorde" : pcs.length === 2 ? "Intervalo" : "Nota";
@@ -250,13 +293,7 @@ function updateSlotChordLabel() {
       : `${kind} · ${classLine}`;
   }
   if (el) {
-    if (detail) {
-      el.textContent = detail;
-      el.classList.remove("slots-chord--empty");
-    } else {
-      el.textContent = "";
-      el.classList.add("slots-chord--empty");
-    }
+    fillSlotChordVoicing(el, desc.voicingLine, desc.instruction, pf);
   }
 }
 
@@ -3891,7 +3928,11 @@ function refreshPlayheadDashboard() {
   const desc = describeActiveSlotsChord(midis, pf);
   big.textContent = desc.head;
   const scaleLab = SCALE_TYPES[effectiveSoloScaleKey()]?.label || "—";
-  let metaLine = desc.detail ? `${desc.detail} · Escala solo: ${scaleLab}` : `Harmonia: ${harmId} · Escala solo: ${scaleLab}`;
+  const sorted = [...new Set(midis)].sort((a, b) => a - b);
+  const pitchSummary = sorted.map((m) => midiNoteLabel(m, pf, "pitch")).join(" · ");
+  let metaLine = pitchSummary
+    ? `Notas: ${pitchSummary} · Escala solo: ${scaleLab}`
+    : `Harmonia: ${harmId} · Escala solo: ${scaleLab}`;
   if (muteHarm) metaLine += " · Sample do acorde em silêncio";
   meta.textContent = metaLine;
 
