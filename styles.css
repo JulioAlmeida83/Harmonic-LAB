@@ -221,6 +221,35 @@ body.mode-simple .is-advanced {
   box-shadow: 0 0 0 1px rgba(108, 156, 255, 0.25);
 }
 
+/* Registo relativo (sem dígito de oitava no texto): mais grave / mais aguda */
+.harm-hear-pill.note-reg-low,
+.dash-harm-pill.note-reg-low,
+.dash-solo-pill.note-reg-low,
+.scale-seq-pill.note-reg-low {
+  color: rgba(150, 195, 255, 0.95);
+  border-color: rgba(120, 170, 255, 0.55);
+  background: rgba(70, 110, 200, 0.12);
+}
+
+.harm-hear-pill.note-reg-high,
+.dash-harm-pill.note-reg-high,
+.dash-solo-pill.note-reg-high,
+.scale-seq-pill.note-reg-high {
+  color: rgba(255, 224, 168, 0.98);
+  border-color: rgba(230, 190, 120, 0.55);
+  background: rgba(200, 150, 60, 0.12);
+}
+
+.harm-hear-pill.note-reg-low.is-current,
+.dash-harm-pill.note-reg-low.is-current {
+  background: rgba(70, 110, 200, 0.28);
+}
+
+.harm-hear-pill.note-reg-high.is-current,
+.dash-harm-pill.note-reg-high.is-current {
+  background: rgba(200, 150, 60, 0.28);
+}
+
 .solo-hear-line {
   margin-top: 0.55rem;
   font-family: var(--mono);
@@ -362,6 +391,58 @@ body.mode-simple .is-advanced {
   color: var(--text);
   list-style: none;
   box-shadow: 0 0 0 1px rgba(92, 225, 184, 0.12);
+}
+
+/* -------- Pentagrama (notação ao vivo) -------- */
+
+.notation-panel {
+  margin: 0 1.25rem 1rem;
+  padding: 0.85rem 1rem 1rem;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+}
+
+.notation-panel-head {
+  margin-bottom: 0.65rem;
+}
+
+.notation-panel-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.notation-panel-sub {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.4;
+  max-width: 48rem;
+}
+
+.notation-staff-host {
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.28);
+  padding: 0.4rem 0.35rem;
+  min-height: 5.5rem;
+}
+
+.notation-live-svg {
+  display: block;
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.notation-clef-g {
+  font-family: "Segoe UI Symbol", "Noto Music", "Apple Symbols", "DejaVu Sans", serif;
+  fill: rgba(255, 255, 255, 0.82);
 }
 
 .row-instrument {

@@ -45,10 +45,36 @@ function applySlotInputModeChrome() {
   /* no-op (visualização unificada) */
 }
 
-function midiNoteLabel(midi, preferFl) {
+/**
+ * Rótulo de nota a partir do MIDI.
+ * @param {"pitch"|"full"} mode — `pitch` = só classe de altura (C, B♭, F♯… sem oitava).
+ *   `full` = inclui oitava (ex.: G4) para contextos técnicos (voicing explícito).
+ */
+function midiNoteLabel(midi, preferFl, mode = "pitch") {
   const o = Math.floor(midi / 12) - 1;
   const pc = ((midi % 12) + 12) % 12;
-  return `${pcToName(pc, preferFl)}${o}`;
+  const pitch = pcToName(pc, preferFl);
+  if (mode === "full") return `${pitch}${o}`;
+  return pitch;
+}
+
+/** Mediana MIDI de um conjunto (referência para cor de registo). */
+function medianMidi(midis) {
+  if (!midis.length) return 60;
+  const s = [...midis].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+}
+
+/**
+ * Classe CSS quando a nota está claramente abaixo/acima da zona de referência
+ * (oitava relativa), em vez de mostrar o dígito de oitava no texto.
+ */
+function midiRegisterClass(midi, refMidi) {
+  if (!Number.isFinite(midi) || !Number.isFinite(refMidi)) return "";
+  const d = Math.round(midi / 12) - Math.round(refMidi / 12);
+  if (d <= -1) return "note-reg-low";
+  if (d >= 1) return "note-reg-high";
+  return "";
 }
 
 /** Intervalos simples (menor de 12 semitons) entre duas alturas. */
@@ -132,8 +158,8 @@ function dyadLabel(mLow, mHigh, preferFl) {
   const oct = Math.floor(diff / 12);
   const nm = DYAD_SIMPLE_NAMES.get(simple) ?? `${simple} st`;
   const intDesc = oct > 0 ? `${nm} (+${oct}×8)` : nm;
-  const n0 = midiNoteLabel(mLow, preferFl);
-  const n1 = midiNoteLabel(mHigh, preferFl);
+  const n0 = midiNoteLabel(mLow, preferFl, "pitch");
+  const n1 = midiNoteLabel(mHigh, preferFl, "pitch");
   return `${n0}–${n1} (${intDesc})`;
 }
 
@@ -143,11 +169,11 @@ function describeActiveSlotsChord(midis, preferFl) {
   if (!sorted.length) return { head: "—", detail: "" };
   const pcs = [...new Set(sorted.map((m) => ((m % 12) + 12) % 12))].sort((a, b) => a - b);
   const bassPc = ((sorted[0] % 12) + 12) % 12;
-  const voicing = sorted.map((m) => midiNoteLabel(m, preferFl)).join(" – ");
+  const voicing = sorted.map((m) => midiNoteLabel(m, preferFl, "full")).join(" – ");
 
   if (pcs.length === 1) {
     return {
-      head: `${midiNoteLabel(sorted[0], preferFl)} (nota única)`,
+      head: `${midiNoteLabel(sorted[0], preferFl, "pitch")} (nota única)`,
       detail: "Ative mais slots para formar intervalos ou acordes.",
     };
   }
@@ -1236,6 +1262,9 @@ let sampleSlotsArpIndex = 0;
 let sampleBassPatIndex = 0;
 let soloPatIndex = 0;
 let lastSoloChordSig = "";
+/** MIDI mostrados no pentagrama (actualizados com harmonia / solo). */
+let liveNotationHarmonyMidis = [];
+let liveNotationSoloMidis = [];
 /** Assinatura do último acorde desenhado na faixa «ouvir harmonia». */
 let lastHarmHearStripSig = "";
 /** Token / timer do loop da escala (cada «Tocar» incrementa o token). */
@@ -1256,6 +1285,8 @@ function clearHarmonyHearTimers() {
 
 function clearHarmonyHearVisuals() {
   clearHarmonyHearTimers();
+  liveNotationHarmonyMidis = [];
+  renderLiveNotationStaff();
   for (const id of ["harmHearStrip", "dashHarmStrip"]) {
     const host = document.getElementById(id);
     if (host) host.innerHTML = "";
@@ -1268,37 +1299,270 @@ function fillHarmonyHearStrip(host, midis, extraClasses) {
   if (!midis.length) return;
   const pf = preferFlats();
   const uniq = [...new Set(midis)].sort((a, b) => a - b);
+  const ref = medianMidi(uniq);
   for (const m of uniq) {
     const pill = document.createElement("span");
     pill.className = ["harm-hear-pill", extraClasses].filter(Boolean).join(" ");
     pill.setAttribute("role", "listitem");
     pill.dataset.midi = String(m);
-    pill.textContent = midiNoteLabel(m, pf);
+    pill.textContent = midiNoteLabel(m, pf, "pitch");
+    const reg = midiRegisterClass(m, ref);
+    if (reg) pill.classList.add(reg);
     host.appendChild(pill);
   }
 }
 
 function renderHarmonyHearPillsFromMidis(midis) {
+  liveNotationHarmonyMidis = Array.isArray(midis) ? [...new Set(midis)].sort((a, b) => a - b) : [];
+  renderLiveNotationStaff();
   fillHarmonyHearStrip(document.getElementById("harmHearStrip"), midis, "");
   fillHarmonyHearStrip(document.getElementById("dashHarmStrip"), midis, "dash-harm-pill");
 }
 
 function clearDashSoloPills() {
-  const host = document.getElementById("dashSoloStrip");
-  if (host) host.innerHTML = "";
+  renderDashSoloPills([]);
 }
 
-function renderDashSoloPills(labels) {
+/** Pills do solo no painel «Ao vivo»: só classe de altura + cor de registo. */
+function renderDashSoloPills(soloMidis) {
   const host = document.getElementById("dashSoloStrip");
   if (!host) return;
   host.innerHTML = "";
-  for (const lab of labels) {
-    const pill = document.createElement("span");
-    pill.className = "dash-solo-pill";
-    pill.setAttribute("role", "listitem");
-    pill.textContent = lab;
-    host.appendChild(pill);
+  const pf = preferFlats();
+  if (Array.isArray(soloMidis) && soloMidis.length) {
+    liveNotationSoloMidis = [...new Set(soloMidis)].sort((a, b) => a - b);
+    renderLiveNotationStaff();
+    const ref = medianMidi(liveNotationSoloMidis);
+    for (const m of liveNotationSoloMidis) {
+      const pill = document.createElement("span");
+      pill.className = "dash-solo-pill";
+      pill.setAttribute("role", "listitem");
+      pill.dataset.midi = String(m);
+      pill.textContent = midiNoteLabel(m, pf, "pitch");
+      const reg = midiRegisterClass(m, ref);
+      if (reg) pill.classList.add(reg);
+      host.appendChild(pill);
+    }
+  } else {
+    liveNotationSoloMidis = [];
+    renderLiveNotationStaff();
   }
+}
+
+const LIVE_NOTATION_NS = "http://www.w3.org/2000/svg";
+const STAFF_NATURAL_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+
+/** Ordem diatónica E F G A B | C D … a partir de E3 para indexar passos no pentagrama. */
+const LIVE_STAFF_E4 = (() => {
+  const order = [];
+  for (let base = 0; base <= 11; base += 1) {
+    for (const n of ["E", "F", "G", "A", "B"]) {
+      order.push({ letter: n, octave: base });
+    }
+    order.push({ letter: "C", octave: base + 1 });
+    order.push({ letter: "D", octave: base + 1 });
+  }
+  const iE4 = order.findIndex((x) => x.letter === "E" && x.octave === 4);
+  return { order, iE4: iE4 < 0 ? 0 : iE4 };
+})();
+
+function letterOctaveToStaffStepFromE4(letter, octave) {
+  const { order, iE4 } = LIVE_STAFF_E4;
+  const iT = order.findIndex((x) => x.letter === letter && x.octave === octave);
+  if (iT < 0) {
+    const pc0 = STAFF_NATURAL_PC[letter];
+    if (pc0 === undefined) return 0;
+    const nMidi = (octave + 1) * 12 + pc0;
+    return Math.round(((nMidi - 64) / 12) * 7);
+  }
+  return iT - iE4;
+}
+
+function parseMidiStaffSpelling(midi, preferFl) {
+  const octave = Math.floor(midi / 12) - 1;
+  const pc = ((midi % 12) + 12) % 12;
+  const base = pcToName(pc, preferFl);
+  const baseRaw = base.replace(/♭/g, "b").replace(/♯/g, "#");
+  const letter = baseRaw.charAt(0);
+  const rest = baseRaw.slice(1);
+  let acc = "";
+  if (rest.includes("b")) acc = "♭";
+  else if (rest.includes("#")) acc = "♯";
+  const name = `${base}${octave}`;
+  return { letter, octave, acc, name };
+}
+
+/** Pentagrama (clave de Sol): harmonia e solo a partir dos MIDI actuais. */
+function renderLiveNotationStaff() {
+  const host = document.getElementById("notationStaffHost");
+  if (!host) return;
+
+  const pf = preferFlats();
+  const harm = liveNotationHarmonyMidis;
+  const sol = liveNotationSoloMidis;
+  const hasHarm = harm.length > 0;
+  const hasSol = sol.length > 0;
+
+  const NS = LIVE_NOTATION_NS;
+  host.textContent = "";
+
+  const lineGap = 14;
+  const staffLeft = 52;
+  const staffRight = 454;
+  const staffBottom0 = 86;
+  const rowGap = 78;
+  const rowCount = !hasHarm && !hasSol ? 1 : hasHarm && hasSol ? 2 : 1;
+  const svgH = 18 + rowCount * rowGap;
+
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 480 ${svgH}`);
+  svg.setAttribute("class", "notation-live-svg");
+  svg.setAttribute("aria-hidden", "true");
+
+  function staffLines(g) {
+    for (let k = 0; k < 5; k += 1) {
+      const ly = staffBottom0 - k * lineGap;
+      const line = document.createElementNS(NS, "line");
+      line.setAttribute("x1", String(staffLeft));
+      line.setAttribute("x2", String(staffRight));
+      line.setAttribute("y1", String(ly));
+      line.setAttribute("y2", String(ly));
+      line.setAttribute("stroke", "rgba(255,255,255,0.22)");
+      line.setAttribute("stroke-width", "1");
+      g.appendChild(line);
+    }
+  }
+
+  function trebleClef(g) {
+    const clef = document.createElementNS(NS, "text");
+    clef.setAttribute("x", "12");
+    clef.setAttribute("y", String(staffBottom0 - 30));
+    clef.setAttribute("font-size", "40");
+    clef.setAttribute("class", "notation-clef-g");
+    clef.textContent = "\uD834\uDD1E";
+    g.appendChild(clef);
+  }
+
+  function drawNotesOnStaff(g, label, noteMidis, fill, stroke) {
+    const lab = document.createElementNS(NS, "text");
+    lab.setAttribute("x", "6");
+    lab.setAttribute("y", String(staffBottom0 - 62));
+    lab.setAttribute("fill", "var(--muted, #9aa3b2)");
+    lab.setAttribute("font-size", "10");
+    lab.textContent = label;
+    g.appendChild(lab);
+
+    staffLines(g);
+    trebleClef(g);
+
+    const uniq = [...new Set(noteMidis)].sort((a, b) => a - b);
+    if (!uniq.length) return;
+
+    const staffTop = staffBottom0 - 4 * lineGap;
+    const spread = Math.min(26, Math.max(15, Math.floor((staffRight - staffLeft - 48) / Math.max(uniq.length, 1))));
+    const blockW = (uniq.length - 1) * spread;
+    const x0 = staffLeft + Math.max(48, (staffRight - staffLeft - blockW) / 2);
+
+    const placed = [];
+    for (let i = 0; i < uniq.length; i += 1) {
+      const midi = uniq[i];
+      const sp = parseMidiStaffSpelling(midi, pf);
+      const step = letterOctaveToStaffStepFromE4(sp.letter, sp.octave);
+      const y = staffBottom0 - step * (lineGap / 2);
+      let x = x0 + i * spread;
+      for (const p of placed) {
+        if (Math.abs(p.y - y) < 5 && Math.abs(p.x - x) < 12) x += 12;
+      }
+      placed.push({ x, y });
+
+      if (y > staffBottom0 + 1 || y < staffTop - 1) {
+        const lx = document.createElementNS(NS, "line");
+        lx.setAttribute("x1", String(x - 16));
+        lx.setAttribute("x2", String(x + 18));
+        lx.setAttribute("y1", String(y));
+        lx.setAttribute("y2", String(y));
+        lx.setAttribute("stroke", "rgba(255,255,255,0.3)");
+        lx.setAttribute("stroke-width", "1");
+        g.appendChild(lx);
+      }
+
+      if (sp.acc) {
+        const ax = document.createElementNS(NS, "text");
+        ax.setAttribute("x", String(x - 19));
+        ax.setAttribute("y", String(y + 5));
+        ax.setAttribute("font-size", "16");
+        ax.setAttribute("fill", stroke);
+        ax.setAttribute("font-family", "Georgia, 'Times New Roman', serif");
+        ax.textContent = sp.acc;
+        g.appendChild(ax);
+      }
+
+      const head = document.createElementNS(NS, "ellipse");
+      head.setAttribute("cx", String(x));
+      head.setAttribute("cy", String(y));
+      head.setAttribute("rx", "7");
+      head.setAttribute("ry", "5");
+      head.setAttribute("fill", fill);
+      head.setAttribute("stroke", stroke);
+      head.setAttribute("stroke-width", "1.2");
+      g.appendChild(head);
+
+      const stemDown = step >= 3;
+      const stem = document.createElementNS(NS, "line");
+      if (stemDown) {
+        stem.setAttribute("x1", String(x + 5));
+        stem.setAttribute("x2", String(x + 5));
+        stem.setAttribute("y1", String(y + 2));
+        stem.setAttribute("y2", String(y + 28));
+      } else {
+        stem.setAttribute("x1", String(x - 5));
+        stem.setAttribute("x2", String(x - 5));
+        stem.setAttribute("y1", String(y - 2));
+        stem.setAttribute("y2", String(y - 28));
+      }
+      stem.setAttribute("stroke", stroke);
+      stem.setAttribute("stroke-width", "1.4");
+      stem.setAttribute("stroke-linecap", "round");
+      g.appendChild(stem);
+    }
+  }
+
+  const harmFill = "rgba(108, 156, 255, 0.38)";
+  const harmStroke = "rgba(140, 178, 255, 0.98)";
+  const solFill = "rgba(92, 225, 184, 0.32)";
+  const solStroke = "rgba(120, 240, 210, 0.98)";
+
+  if (!hasHarm && !hasSol) {
+    const g = document.createElementNS(NS, "g");
+    staffLines(g);
+    trebleClef(g);
+    const hint = document.createElementNS(NS, "text");
+    hint.setAttribute("x", String(staffLeft + 44));
+    hint.setAttribute("y", String(staffBottom0 - 40));
+    hint.setAttribute("fill", "var(--muted, #9aa3b2)");
+    hint.setAttribute("font-size", "12");
+    hint.textContent = "Ligue harmonia ou solo para ver as notas no pentagrama.";
+    g.appendChild(hint);
+    svg.appendChild(g);
+  } else if (hasHarm && hasSol) {
+    const g0 = document.createElementNS(NS, "g");
+    drawNotesOnStaff(g0, "Harmonia", harm, harmFill, harmStroke);
+    svg.appendChild(g0);
+    const g1 = document.createElementNS(NS, "g");
+    g1.setAttribute("transform", `translate(0,${rowGap})`);
+    drawNotesOnStaff(g1, "Solo", sol, solFill, solStroke);
+    svg.appendChild(g1);
+  } else if (hasHarm) {
+    const g0 = document.createElementNS(NS, "g");
+    drawNotesOnStaff(g0, "Harmonia", harm, harmFill, harmStroke);
+    svg.appendChild(g0);
+  } else {
+    const g0 = document.createElementNS(NS, "g");
+    drawNotesOnStaff(g0, "Solo", sol, solFill, solStroke);
+    svg.appendChild(g0);
+  }
+
+  host.appendChild(svg);
 }
 
 /**
@@ -1397,11 +1661,14 @@ function renderScaleSeqPreview(degs, midis) {
   if (!host) return;
   host.innerHTML = "";
   const pf = preferFlats();
+  const ref = medianMidi(midis);
   for (let i = 0; i < midis.length; i += 1) {
     const pill = document.createElement("span");
     pill.className = "scale-seq-pill";
     pill.dataset.index = String(i);
-    pill.textContent = `${midiNoteLabel(midis[i], pf)} · gr. ${degs[i]}`;
+    pill.textContent = `${midiNoteLabel(midis[i], pf, "pitch")} · gr. ${degs[i]}`;
+    const reg = midiRegisterClass(midis[i], ref);
+    if (reg) pill.classList.add(reg);
     host.appendChild(pill);
   }
 }
@@ -2471,28 +2738,37 @@ function refreshSampleExecutionLoop() {
           soloPatIndex = 0;
         }
 
-        const { offsets, durs } = soloRhythmOffsets(soloRhythm, beat, sampleHarmonyBeatIndex % 4);
         const soloHear = document.getElementById("soloHearLine");
-        if (offsets.length > 0) {
-          const degrees = generateSoloDegrees(soloPattern, chord.intervals, scaleIvals, soloPatIndex, offsets.length);
-          soloPatIndex += offsets.length;
-          const peak = Math.max(0.04, Math.min(0.2, soloVol * 0.18));
-          const pfSolo = preferFlats();
-          const soloBits = [];
-          for (let i = 0; i < degrees.length; i += 1) {
-            const semitones = degrees[i];
-            const rawMidi = 12 * (soloOct + 1) + chord.rootPc + semitones;
-            const midi = soloMidiToPlayableRange(rawMidi, chord.rootPc, soloOct);
-            soloBits.push(midiNoteLabel(midi, pfSolo));
-            audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t + offsets[i], peak, durs[i]);
+        const windowBeats = soloChordWindowBeats(ctxSolo);
+        const startGlobalBeat = ctxSolo.fromProgression ? progState.beatCounter : sampleHarmonyBeatIndex;
+
+        if (soloIsFirstBeatOfQuantizeWindow(ctxSolo)) {
+          const { attacks } = buildSoloQuantizedTimeline(soloRhythm, beat, windowBeats, startGlobalBeat);
+          if (attacks.length > 0) {
+            const degrees = generateSoloDegrees(soloPattern, chord.intervals, scaleIvals, soloPatIndex, attacks.length);
+            soloPatIndex += attacks.length;
+            const peak = Math.max(0.04, Math.min(0.2, soloVol * 0.18));
+            const pfSolo = preferFlats();
+            const soloMidisPlayed = [];
+            for (let i = 0; i < degrees.length; i += 1) {
+              const semitones = degrees[i];
+              const rawMidi = 12 * (soloOct + 1) + chord.rootPc + semitones;
+              const midi = soloMidiToPlayableRange(rawMidi, chord.rootPc, soloOct);
+              soloMidisPlayed.push(midi);
+              audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t + attacks[i].off, peak, attacks[i].dur);
+            }
+            if (soloHear) {
+              const wLabel = windowBeats > PROG_BEATS_PER_BAR ? `${windowBeats / PROG_BEATS_PER_BAR} comp.` : "1 comp.";
+              const soloPitchLine = soloMidisPlayed.map((m) => midiNoteLabel(m, pfSolo, "pitch")).join(" · ");
+              soloHear.textContent = soloMidisPlayed.length
+                ? `Solo (frase em ${wLabel}, quantizada ao acorde): ${soloPitchLine}`
+                : "";
+            }
+            renderDashSoloPills(soloMidisPlayed);
+          } else if (soloHear) {
+            soloHear.textContent = "";
+            clearDashSoloPills();
           }
-          if (soloHear) {
-            soloHear.textContent = soloBits.length ? `Solo (esta batida): ${soloBits.join(" · ")}` : "";
-          }
-          renderDashSoloPills(soloBits);
-        } else if (soloHear) {
-          soloHear.textContent = "";
-          clearDashSoloPills();
         }
       } else {
         const soloHearBad = document.getElementById("soloHearLine");
@@ -3296,6 +3572,62 @@ const progState = {
 /** 4 beats = 1 compasso (apenas 4/4 por agora). */
 const PROG_BEATS_PER_BAR = 4;
 
+/**
+ * Duração da janela de quantização do solo em batidas (4/4):
+ * — com «Seguir sequência»: compassos do passo actual (`step.bars`×4);
+ * — na tonalidade: um compasso (4 batidas), alinhado ao índice global de batida.
+ */
+function soloChordWindowBeats(ctxSolo) {
+  if (ctxSolo.fromProgression) {
+    const at = getActiveProgressionStep();
+    if (at?.step?.bars != null) return Math.max(1, Math.floor(Number(at.step.bars)) || 1) * PROG_BEATS_PER_BAR;
+  }
+  return PROG_BEATS_PER_BAR;
+}
+
+/** `true` na primeira batida da janela (início do acorde na sequência ou do compasso em modo tonal). */
+function soloIsFirstBeatOfQuantizeWindow(ctxSolo) {
+  if (ctxSolo.fromProgression) {
+    const at = getActiveProgressionStep();
+    if (!at) return false;
+    const beatInBar = progState.beatCounter % PROG_BEATS_PER_BAR;
+    const beatsIntoStep = at.barInStep * PROG_BEATS_PER_BAR + beatInBar;
+    return beatsIntoStep === 0;
+  }
+  return sampleHarmonyBeatIndex % PROG_BEATS_PER_BAR === 0;
+}
+
+/**
+ * Junta o ritmo de solo de `windowBeats` batidas e, se o modelo ultrapassar o
+ * fim da janela, escala proporcionalmente para caber em `windowBeats * beatSec`.
+ */
+function buildSoloQuantizedTimeline(soloRhythm, beatSec, windowBeats, startGlobalBeat) {
+  const attacks = [];
+  for (let b = 0; b < windowBeats; b += 1) {
+    const bib = (startGlobalBeat + b) % PROG_BEATS_PER_BAR;
+    const { offsets, durs } = soloRhythmOffsets(soloRhythm, beatSec, bib);
+    const base = b * beatSec;
+    for (let i = 0; i < offsets.length; i += 1) {
+      attacks.push({ off: base + offsets[i], dur: durs[i] });
+    }
+  }
+  const windowEnd = windowBeats * beatSec;
+  const lastEnd = attacks.length ? Math.max(...attacks.map((a) => a.off + a.dur)) : 0;
+  if (lastEnd > windowEnd && lastEnd > 1e-6) {
+    const scale = windowEnd / lastEnd;
+    for (const a of attacks) {
+      a.off *= scale;
+      a.dur *= scale;
+    }
+  }
+  for (const a of attacks) {
+    const margin = 0.004;
+    a.off = Math.min(a.off, windowEnd - margin);
+    a.dur = Math.min(a.dur, Math.max(0.024, windowEnd - a.off));
+  }
+  return { attacks, windowEnd };
+}
+
 /** Chaves candidatas para auto-escala (limitadas para evitar escolhas exóticas). */
 const PROG_AUTO_SCALE_CANDIDATES = [
   "major",
@@ -4025,6 +4357,7 @@ function wireGlobalControls() {
     progResolveFromUI();
     progRefreshCifras();
     progRenderStatus();
+    renderLiveNotationStaff();
     scheduleSyncAudio();
     refreshSampleExecutionLoop();
   };
@@ -4448,6 +4781,7 @@ wireProgressionControls();
 progResolveFromUI();
 progRefreshCifras();
 progRenderStatus();
+renderLiveNotationStaff();
 updateSampleControlsEnabled();
 updateSlotsMissingNotes();
 

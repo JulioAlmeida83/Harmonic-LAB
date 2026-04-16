@@ -58,11 +58,19 @@ aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
         <p class="playhead-dash-footnote">O realce segue cada nota quando o sampler toca.</p>
       </div>
       <div class="playhead-dash-card playhead-dash-card--solo">
-        <div class="playhead-dash-label">Solo — toque nesta batida</div>
+        <div class="playhead-dash-label">Solo — frase no acorde</div>
         <div id="dashSoloStrip" class="dash-note-strip dash-solo-strip" role="list" aria-live="off"></div>
-        <p class="playhead-dash-footnote">Figuras geradas pelo padrão e ritmo de solo activos.</p>
+        <p class="playhead-dash-footnote">Padrão + ritmo formam uma frase por acorde (sequência) ou por compasso (tonalidade); o tempo comprime/expande para caber exactamente nessa duração.</p>
       </div>
     </div>
+  </section>
+
+  <section class="notation-panel" id="notationPanel" aria-label="Pentagrama — notas a executar">
+    <div class="notation-panel-head">
+      <h3 class="notation-panel-title">Pentagrama</h3>
+      <p class="notation-panel-sub">Clave de Sol: harmonia (azul) e frase de solo (verde). Nas pills, oitavas não são mostradas; tons mais graves ou mais agudos que a zona média do acorde usam azul-claro ou âmbar.</p>
+    </div>
+    <div id="notationStaffHost" class="notation-staff-host" role="img" aria-live="off"></div>
   </section>
 
   <section class="panel panel-context" aria-label="Contexto tonal">
@@ -443,7 +451,7 @@ aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
       </div>
       <p class="export-hint prog-solo-hint">
         Escolha a <strong>escala das frases</strong> (ou use a global). Com «Base na escala do solo», a harmonia estática usa os mesmos graus — encaixa tríades diatónicas sobre as notas do solo.
-        Em «Seguir sequência», o solo adapta-se a cada acorde do editor abaixo.
+        Em «Seguir sequência», o solo adapta-se a cada acorde do editor abaixo; cada frase quantiza-se à duração desse acorde (compassos do passo). Na tonalidade, a janela é um compasso (4 batidas).
       </p>
       <div class="row row-solo-meta">
         <label class="field field-wide">
