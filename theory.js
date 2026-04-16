@@ -2209,6 +2209,164 @@ function soloRhythmOffsets(rhythmId, beat, beatInBar) {
 
 const SOLO_RHYTHM_IDS = Object.keys(SOLO_RHYTHMS);
 
+// --- Presets de exercício (melodic cells) ------------------------------------
+
+const SOLO_EXERCISES = [
+  // ---- Cadências II-V-I (4) ----
+  {
+    id: "251_arp", label: "II-V-I Major — Arpejo", category: "ii-V-I",
+    steps: [{ roman: "ii", bars: 1 }, { roman: "V7", bars: 1 }, { roman: "I", bars: 2 }],
+    soloPattern: "arp_up", soloRhythm: "swing", bpm: 120,
+    description: "Arpejos dos acordes em swing. Base de todo o vocabulário jazz.",
+  },
+  {
+    id: "251_scale", label: "II-V-I Major — Escala", category: "ii-V-I",
+    steps: [{ roman: "ii", bars: 1 }, { roman: "V7", bars: 1 }, { roman: "I", bars: 2 }],
+    soloPattern: "scale_up", soloRhythm: "eighths", bpm: 96,
+    description: "Escala do modo correspondente a cada acorde, em colcheias straight.",
+  },
+  {
+    id: "251_approach", label: "II-V-I Major — Approach", category: "ii-V-I",
+    steps: [{ roman: "ii", bars: 1 }, { roman: "V7", bars: 1 }, { roman: "I", bars: 2 }],
+    soloPattern: "approach", soloRhythm: "swing", bpm: 100,
+    description: "Approach cromático antes de cada chord tone. Conceito bebop essencial.",
+  },
+  {
+    id: "251_enclosure", label: "II-V-I Major — Enclosure", category: "ii-V-I",
+    steps: [{ roman: "ii", bars: 1 }, { roman: "V7", bars: 1 }, { roman: "I", bars: 2 }],
+    soloPattern: "enclosure", soloRhythm: "swing", bpm: 88,
+    description: "Enclosure (acima-abaixo-alvo) em cada chord tone. Técnica de Charlie Parker.",
+  },
+
+  // ---- Blues (3) ----
+  {
+    id: "blues_pent", label: "Blues 12 bars — Pentatónica", category: "blues",
+    steps: [
+      { roman: "I", bars: 4 }, { roman: "IV", bars: 2 }, { roman: "I", bars: 2 },
+      { roman: "V", bars: 1 }, { roman: "IV", bars: 1 }, { roman: "I", bars: 1 }, { roman: "V", bars: 1 },
+    ],
+    soloPattern: "pent", soloRhythm: "swing", bpm: 120,
+    description: "Pentatónica sobre blues 12 compassos. O exercício mais fundamental.",
+  },
+  {
+    id: "blues_approach", label: "Blues 12 bars — Approach", category: "blues",
+    steps: [
+      { roman: "I", bars: 4 }, { roman: "IV", bars: 2 }, { roman: "I", bars: 2 },
+      { roman: "V", bars: 1 }, { roman: "IV", bars: 1 }, { roman: "I", bars: 1 }, { roman: "V", bars: 1 },
+    ],
+    soloPattern: "approach", soloRhythm: "eighths", bpm: 100,
+    description: "Approach cromático sobre blues. Vocabulário bebop sobre forma blues.",
+  },
+  {
+    id: "blues_minor", label: "Minor Blues — Arpejo", category: "blues",
+    steps: [
+      { roman: "i", bars: 4 }, { roman: "iv", bars: 2 }, { roman: "i", bars: 2 },
+      { roman: "V7", bars: 1 }, { roman: "iv", bars: 1 }, { roman: "i", bars: 1 }, { roman: "V7", bars: 1 },
+    ],
+    soloPattern: "arp_down", soloRhythm: "swing", bpm: 108,
+    description: "Arpejos descendentes sobre blues menor. Sonoridade dark e expressiva.",
+  },
+
+  // ---- Standards / Changes (4) ----
+  {
+    id: "rhythm_digital", label: "Rhythm Changes A — Digital", category: "standards",
+    steps: [
+      { roman: "I", bars: 1 }, { roman: "vi", bars: 1 },
+      { roman: "ii", bars: 1 }, { roman: "V", bars: 1 },
+      { roman: "I", bars: 1 }, { roman: "vi", bars: 1 },
+      { roman: "ii", bars: 1 }, { roman: "V", bars: 1 },
+    ],
+    soloPattern: "digital_1235", soloRhythm: "swing", bpm: 140,
+    description: "Padrão 1-2-3-5 sobre Rhythm Changes (I Got Rhythm). Tempo rápido.",
+  },
+  {
+    id: "autumn_scale", label: "Autumn Leaves — Escala", category: "standards",
+    steps: [
+      { roman: "ii", bars: 1 }, { roman: "V7", bars: 1 },
+      { roman: "I", bars: 1 }, { roman: "IV", bars: 1 },
+      { roman: "vii", bars: 1 }, { roman: "III7", bars: 1 },
+      { roman: "vi", bars: 2 },
+    ],
+    soloPattern: "scale_up", soloRhythm: "swing", bpm: 120,
+    description: "Escalas sobre a forma de Autumn Leaves. Cadências diatónicas encadeadas.",
+  },
+  {
+    id: "giant_arp", label: "Giant Steps — Arpejo", category: "standards",
+    steps: [
+      { chord: "Bmaj7", bars: 1 }, { chord: "D7", bars: 1 },
+      { chord: "Gmaj7", bars: 1 }, { chord: "Bb7", bars: 1 },
+      { chord: "Ebmaj7", bars: 2 },
+    ],
+    soloPattern: "arp_up", soloRhythm: "triplets", bpm: 100,
+    description: "Arpejos em tercinas sobre Giant Steps simplificado. Ciclo de terças maiores.",
+  },
+  {
+    id: "turnaround_enc", label: "Turnaround I-vi-ii-V — Enclosure", category: "standards",
+    steps: [
+      { roman: "I", bars: 1 }, { roman: "vi", bars: 1 },
+      { roman: "ii", bars: 1 }, { roman: "V7", bars: 1 },
+    ],
+    soloPattern: "enclosure", soloRhythm: "swing", bpm: 120,
+    description: "Enclosure sobre turnaround clássico. Exercício de resolução harmónica.",
+  },
+
+  // ---- Modal (3) ----
+  {
+    id: "dorian_vamp", label: "Dorian Vamp — Escala", category: "modal",
+    steps: [{ roman: "i", bars: 4 }],
+    soloPattern: "scale_up", soloRhythm: "swing", bpm: 108,
+    description: "Escala dórica sobre acorde menor estático. Estilo So What / Impressions.",
+  },
+  {
+    id: "mixo_thirds", label: "Mixolydian Vamp — Terças", category: "modal",
+    steps: [{ roman: "I", bars: 4 }],
+    soloPattern: "thirds", soloRhythm: "eighths", bpm: 100,
+    description: "Terças diatónicas sobre vamp mixolídio. Desenvolve fluidez intervalica.",
+  },
+  {
+    id: "lydian_pent", label: "Lydian Vamp — Pentatónica", category: "modal",
+    steps: [{ roman: "I", bars: 4 }],
+    soloPattern: "pent", soloRhythm: "bossa", bpm: 96,
+    description: "Pentatónica sobre vamp lídio em ritmo bossa. Sonoridade aberta e luminosa.",
+  },
+
+  // ---- Cells / Drills (2) ----
+  {
+    id: "enc_drill", label: "Enclosure Drill — Ciclo de 4as", category: "drills",
+    steps: [
+      { chord: "Cmaj7", bars: 1 }, { chord: "Fmaj7", bars: 1 },
+      { chord: "Bbmaj7", bars: 1 }, { chord: "Ebmaj7", bars: 1 },
+      { chord: "Abmaj7", bars: 1 }, { chord: "Dbmaj7", bars: 1 },
+      { chord: "Gbmaj7", bars: 1 }, { chord: "Bmaj7", bars: 1 },
+      { chord: "Emaj7", bars: 1 }, { chord: "Amaj7", bars: 1 },
+      { chord: "Dmaj7", bars: 1 }, { chord: "Gmaj7", bars: 1 },
+    ],
+    soloPattern: "enclosure", soloRhythm: "quarters", bpm: 80,
+    description: "Enclosure em cada tonalidade (ciclo de quartas). Internaliza o gesto em todas as chaves.",
+  },
+  {
+    id: "digital_drill", label: "1-2-3-5 Drill — Ciclo de 4as", category: "drills",
+    steps: [
+      { chord: "Cmaj7", bars: 1 }, { chord: "Fmaj7", bars: 1 },
+      { chord: "Bbmaj7", bars: 1 }, { chord: "Ebmaj7", bars: 1 },
+      { chord: "Abmaj7", bars: 1 }, { chord: "Dbmaj7", bars: 1 },
+      { chord: "Gbmaj7", bars: 1 }, { chord: "Bmaj7", bars: 1 },
+      { chord: "Emaj7", bars: 1 }, { chord: "Amaj7", bars: 1 },
+      { chord: "Dmaj7", bars: 1 }, { chord: "Gmaj7", bars: 1 },
+    ],
+    soloPattern: "digital_1235", soloRhythm: "swing", bpm: 100,
+    description: "Padrão digital 1-2-3-5 por todas as tonalidades. Treino de fluência harmónica.",
+  },
+];
+
+const SOLO_EXERCISE_CATEGORIES = [
+  { key: "ii-V-I", label: "Cadências II-V-I" },
+  { key: "blues", label: "Blues" },
+  { key: "standards", label: "Standards / Changes" },
+  { key: "modal", label: "Modal" },
+  { key: "drills", label: "Cells / Drills" },
+];
+
 // --- Export dual-mode (browser globals + CommonJS) --------------------------
 
 (function (root, api) {
@@ -2284,4 +2442,6 @@ const SOLO_RHYTHM_IDS = Object.keys(SOLO_RHYTHMS);
   SOLO_RHYTHM_IDS,
   generateSoloDegrees,
   soloRhythmOffsets,
+  SOLO_EXERCISES,
+  SOLO_EXERCISE_CATEGORIES,
 });

@@ -444,6 +444,12 @@
         <input type="checkbox" id="soloEnabled" />
         <span>Ativar solo</span>
       </label>
+      <label class="field field-wide">
+        <span>Exercício</span>
+        <select id="soloExercise">
+          <option value="custom">Manual (escolhe abaixo)</option>
+        </select>
+      </label>
       <label class="field">
         <span>Padrão melódico</span>
         <select id="soloPattern">
@@ -494,6 +500,7 @@
         />
       </label>
     </div>
+    <div id="soloPentagrama" class="solo-staff-wrap" aria-label="Pentagrama do solo"></div>
   </section>
 
   <section class="panel panel-scale-player" aria-label="Tocar escala">

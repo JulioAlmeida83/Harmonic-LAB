@@ -1165,3 +1165,25 @@ body.mode-simple .panel-progression {
 .export-dialog[data-mode="live"] [data-mode="render"] {
   display: none;
 }
+
+/* -------- Solo pentagrama -------- */
+
+.solo-staff-wrap {
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 0;
+  margin-top: 0.6rem;
+  min-height: 80px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.solo-staff-wrap:empty {
+  display: none;
+}
+
+.solo-note ellipse {
+  transition: fill 0.12s ease, rx 0.12s ease, ry 0.12s ease;
+}
