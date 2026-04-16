@@ -970,6 +970,8 @@ let sampleHarmonyArpIndex = 0;
 let sampleHarmonyBeatIndex = 0; // avança em TODAS as batidas (não só arpejo)
 let sampleSlotsArpIndex = 0;
 let sampleBassPatIndex = 0;
+let soloPatIndex = 0;
+let lastSoloChordSig = "";
 /** Token / timer do loop da escala (cada «Tocar» incrementa o token). */
 let scaleLoopToken = 0;
 let scaleLoopTimer = null;
@@ -1113,6 +1115,8 @@ function stopSampleExecutionLoop() {
   sampleHarmonyBeatIndex = 0;
   sampleSlotsArpIndex = 0;
   sampleBassPatIndex = 0;
+  soloPatIndex = 0;
+  lastSoloChordSig = "";
 }
 
 // ---------------------------------------------------------------------------
@@ -1953,6 +1957,44 @@ function refreshSampleExecutionLoop() {
           audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t, pk, dur, style);
         });
       });
+    }
+
+    // ---- Solo / Improvisação ------------------------------------------------
+    // Gera linhas melódicas sobre a progressão activa. Cada mudança de acorde
+    // adapta automaticamente as notas ao modo correspondente (via
+    // pickParentScaleForChord). O padrão + ritmo são independentes e
+    // combináveis (10 × 8 = 80 combinações possíveis).
+    const soloEnabled = document.getElementById("soloEnabled")?.checked;
+    if (soloEnabled && progStep && audio.instrumentSampler) {
+      const chord = progStep.step.chord;
+      if (chord && chord.intervals && chord.rootPc != null) {
+        const scaleResult = pickParentScaleForChord(chord, tcp);
+        const scaleKey = scaleResult?.key || "major";
+        const scaleIvals = SCALE_TYPES[scaleKey]?.intervals || SCALE_TYPES.major.intervals;
+        const soloPattern = document.getElementById("soloPattern")?.value || "arp_up";
+        const soloRhythm = document.getElementById("soloRhythm")?.value || "swing";
+        const soloVol = Number(document.getElementById("soloVol")?.value ?? 60) / 100;
+        const soloOct = Number(document.getElementById("soloOctave")?.value ?? 4);
+
+        // Reset do padrão quando o acorde muda (nova frase por acorde).
+        const soloChordSig = `${chord.rootPc}|${chord.intervals.join(",")}`;
+        if (soloChordSig !== lastSoloChordSig) {
+          lastSoloChordSig = soloChordSig;
+          soloPatIndex = 0;
+        }
+
+        const { offsets, durs } = soloRhythmOffsets(soloRhythm, beat, sampleHarmonyBeatIndex % 4);
+        if (offsets.length > 0) {
+          const degrees = generateSoloDegrees(soloPattern, chord.intervals, scaleIvals, soloPatIndex, offsets.length);
+          soloPatIndex += offsets.length;
+          const peak = Math.max(0.04, Math.min(0.2, soloVol * 0.18));
+          for (let i = 0; i < degrees.length; i += 1) {
+            const semitones = degrees[i];
+            const midi = clampMidi(12 * (soloOct + 1) + chord.rootPc + semitones, 24, 96);
+            audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t + offsets[i], peak, durs[i]);
+          }
+        }
+      }
     }
   };
 
@@ -3440,6 +3482,10 @@ function wireGlobalControls() {
     "tonicStyle",
     "tonicOctave",
     "slotMixMode",
+    "soloEnabled",
+    "soloPattern",
+    "soloRhythm",
+    "soloOctave",
   ].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", onContextChange);
@@ -3492,7 +3538,7 @@ function wireGlobalControls() {
       refreshSampleExecutionLoop();
     });
   }
-  ["harmVol", "harmonyBassVol", "droneVol", "slotsVol", "globalBpm", "progVol"].forEach((id) => {
+  ["harmVol", "harmonyBassVol", "droneVol", "slotsVol", "globalBpm", "progVol", "soloVol"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener("input", onContextChange);
   });

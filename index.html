@@ -436,6 +436,66 @@
     <div id="slots" class="slots"></div>
   </section>
 
+  <section class="panel panel-solo is-advanced" aria-label="Solo / Improvisação">
+    <h2>Solo / Improvisação</h2>
+    <p class="export-hint">Gera linhas melódicas sobre a progressão activa. Cada mudança de acorde adapta automaticamente as notas ao modo correspondente.</p>
+    <div class="row">
+      <label class="field field-check">
+        <input type="checkbox" id="soloEnabled" />
+        <span>Ativar solo</span>
+      </label>
+      <label class="field">
+        <span>Padrão melódico</span>
+        <select id="soloPattern">
+          <optgroup label="Arpejos">
+            <option value="arp_up">Arpejo ascendente</option>
+            <option value="arp_down">Arpejo descendente</option>
+            <option value="arp_updown">Arpejo sobe/desce</option>
+          </optgroup>
+          <optgroup label="Escalas">
+            <option value="scale_up">Escala ascendente</option>
+            <option value="scale_down">Escala descendente</option>
+            <option value="thirds">Em terças diatónicas</option>
+            <option value="pent">Pentatónica</option>
+          </optgroup>
+          <optgroup label="Bebop / Jazz">
+            <option value="approach">Approach cromático</option>
+            <option value="enclosure">Enclosure</option>
+            <option value="digital_1235">1-2-3-5 (digital)</option>
+          </optgroup>
+        </select>
+      </label>
+      <label class="field">
+        <span>Ritmo</span>
+        <select id="soloRhythm">
+          <option value="quarters">Semínimas</option>
+          <option value="eighths">Colcheias</option>
+          <option value="swing" selected>Swing</option>
+          <option value="triplets">Tercinas</option>
+          <option value="bossa">Bossa nova</option>
+          <option value="charleston">Charleston</option>
+          <option value="syncopated">Sincopado</option>
+          <option value="sixteenths">Semicolcheias</option>
+        </select>
+      </label>
+      <label class="field field-compact">
+        <span>Oitava</span>
+        <select id="soloOctave">
+          <option value="3">3</option>
+          <option value="4" selected>4</option>
+          <option value="5">5</option>
+        </select>
+      </label>
+      <label class="field field-compact">
+        <span>Volume</span>
+        <input type="range" id="soloVol" min="0" max="100" value="60"
+          title="Volume do solo (0 a 100%)"
+          aria-label="Volume do solo"
+        />
+      </label>
+    </div>
+  </section>
+
   <section class="panel panel-scale-player" aria-label="Tocar escala">
     <h2>Escala completa</h2>
     <div class="row row-scale-exec">
