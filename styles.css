@@ -230,6 +230,140 @@ body.mode-simple .is-advanced {
   min-height: 1.35em;
 }
 
+/* -------- Painel «Ao vivo» (acorde + notas em destaque) -------- */
+
+.playhead-dash {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  margin: 0 1.25rem 1rem;
+  padding: 1rem 1.1rem 1.05rem;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: linear-gradient(165deg, rgba(23, 26, 32, 0.97), rgba(18, 21, 28, 0.99));
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+}
+
+.playhead-dash-header {
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.playhead-dash-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--accent-2);
+  margin: 0 0 0.35rem;
+  font-weight: 700;
+}
+
+.playhead-dash-sub {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.4;
+  max-width: 52rem;
+}
+
+.playhead-dash-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.85rem;
+}
+
+@media (min-width: 900px) {
+  .playhead-dash-grid {
+    grid-template-columns: minmax(11rem, 1fr) minmax(12rem, 1.2fr) minmax(12rem, 1.2fr);
+    gap: 1rem;
+    align-items: stretch;
+  }
+}
+
+.playhead-dash-card {
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.2);
+  min-width: 0;
+}
+
+.playhead-dash-card--chord {
+  border-color: rgba(108, 156, 255, 0.35);
+  background: rgba(108, 156, 255, 0.06);
+}
+
+.playhead-dash-card--solo {
+  border-color: rgba(92, 225, 184, 0.28);
+  background: rgba(92, 225, 184, 0.05);
+}
+
+.playhead-dash-label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  margin-bottom: 0.45rem;
+  font-weight: 600;
+}
+
+.dash-chord-symbol {
+  font-family: var(--font);
+  font-size: clamp(1.85rem, 4vw, 2.65rem);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.dash-chord-meta {
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.dash-note-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  min-height: 2.6rem;
+}
+
+.playhead-dash-footnote {
+  margin: 0.55rem 0 0;
+  font-size: 0.68rem;
+  color: var(--muted);
+  line-height: 1.35;
+  opacity: 0.9;
+}
+
+#dashHarmStrip .harm-hear-pill {
+  font-size: 1rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 9px;
+  font-weight: 600;
+}
+
+.dash-solo-pill {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.45rem 0.75rem;
+  border-radius: 9px;
+  border: 1px solid rgba(92, 225, 184, 0.45);
+  background: rgba(92, 225, 184, 0.12);
+  color: var(--text);
+  list-style: none;
+  box-shadow: 0 0 0 1px rgba(92, 225, 184, 0.12);
+}
+
 .row-instrument {
   margin-top: 0.85rem;
   padding-top: 0.85rem;
@@ -417,7 +551,8 @@ body.mode-simple .is-advanced {
 
 .panel-degree-ref h2,
 .scale-player-head h2,
-.solo-head h2 {
+.solo-head h2,
+.solo-head .prog-solo-title {
   margin: 0;
   flex: 1 1 auto;
   min-width: min(100%, 12rem);
@@ -1236,6 +1371,36 @@ input[type="checkbox"]:focus-visible {
   flex-wrap: wrap;
   gap: 0.75rem;
   align-items: center;
+}
+
+/* Solo embutido na secção da sequência (perto do editor) */
+.prog-solo-workspace {
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(108, 156, 255, 0.06);
+}
+
+.prog-solo-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.prog-solo-hint {
+  margin: 0.5rem 0 0.75rem;
+}
+
+.row-solo-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.65rem 1rem;
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px dashed var(--line);
 }
 
 .prog-steps {

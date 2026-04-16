@@ -1256,26 +1256,47 @@ function clearHarmonyHearTimers() {
 
 function clearHarmonyHearVisuals() {
   clearHarmonyHearTimers();
-  const host = document.getElementById("harmHearStrip");
-  if (host) host.innerHTML = "";
+  for (const id of ["harmHearStrip", "dashHarmStrip"]) {
+    const host = document.getElementById(id);
+    if (host) host.innerHTML = "";
+  }
 }
 
-function renderHarmonyHearPillsFromMidis(midis) {
-  const host = document.getElementById("harmHearStrip");
+function fillHarmonyHearStrip(host, midis, extraClasses) {
   if (!host) return;
-  if (!midis.length) {
-    host.innerHTML = "";
-    return;
-  }
+  host.innerHTML = "";
+  if (!midis.length) return;
   const pf = preferFlats();
   const uniq = [...new Set(midis)].sort((a, b) => a - b);
-  host.innerHTML = "";
   for (const m of uniq) {
     const pill = document.createElement("span");
-    pill.className = "harm-hear-pill";
+    pill.className = ["harm-hear-pill", extraClasses].filter(Boolean).join(" ");
     pill.setAttribute("role", "listitem");
     pill.dataset.midi = String(m);
     pill.textContent = midiNoteLabel(m, pf);
+    host.appendChild(pill);
+  }
+}
+
+function renderHarmonyHearPillsFromMidis(midis) {
+  fillHarmonyHearStrip(document.getElementById("harmHearStrip"), midis, "");
+  fillHarmonyHearStrip(document.getElementById("dashHarmStrip"), midis, "dash-harm-pill");
+}
+
+function clearDashSoloPills() {
+  const host = document.getElementById("dashSoloStrip");
+  if (host) host.innerHTML = "";
+}
+
+function renderDashSoloPills(labels) {
+  const host = document.getElementById("dashSoloStrip");
+  if (!host) return;
+  host.innerHTML = "";
+  for (const lab of labels) {
+    const pill = document.createElement("span");
+    pill.className = "dash-solo-pill";
+    pill.setAttribute("role", "listitem");
+    pill.textContent = lab;
     host.appendChild(pill);
   }
 }
@@ -1294,12 +1315,16 @@ function scheduleHarmonyHearHighlights(t0Abs, events, ctxNow) {
     const endMs = Math.max(startMs + 45, Math.round(startMs + (ev.dur || 0.12) * 1000));
     harmonyHearTimers.push(
       setTimeout(() => {
-        document.querySelector(`#harmHearStrip .harm-hear-pill[data-midi="${midi}"]`)?.classList.add("is-current");
+        document
+          .querySelectorAll(`#harmHearStrip .harm-hear-pill[data-midi="${midi}"], #dashHarmStrip .harm-hear-pill[data-midi="${midi}"]`)
+          .forEach((el) => el.classList.add("is-current"));
       }, startMs),
     );
     harmonyHearTimers.push(
       setTimeout(() => {
-        document.querySelector(`#harmHearStrip .harm-hear-pill[data-midi="${midi}"]`)?.classList.remove("is-current");
+        document
+          .querySelectorAll(`#harmHearStrip .harm-hear-pill[data-midi="${midi}"], #dashHarmStrip .harm-hear-pill[data-midi="${midi}"]`)
+          .forEach((el) => el.classList.remove("is-current"));
       }, endMs),
     );
   }
@@ -1571,6 +1596,8 @@ function stopSampleExecutionLoop() {
   clearHarmonyHearVisuals();
   const soloLnStop = document.getElementById("soloHearLine");
   if (soloLnStop) soloLnStop.textContent = "";
+  clearDashSoloPills();
+  refreshPlayheadDashboard();
 }
 
 // ---------------------------------------------------------------------------
@@ -2462,13 +2489,20 @@ function refreshSampleExecutionLoop() {
           if (soloHear) {
             soloHear.textContent = soloBits.length ? `Solo (esta batida): ${soloBits.join(" · ")}` : "";
           }
+          renderDashSoloPills(soloBits);
         } else if (soloHear) {
           soloHear.textContent = "";
+          clearDashSoloPills();
         }
+      } else {
+        const soloHearBad = document.getElementById("soloHearLine");
+        if (soloHearBad) soloHearBad.textContent = "";
+        clearDashSoloPills();
       }
     } else {
       const sl = document.getElementById("soloHearLine");
       if (sl) sl.textContent = "";
+      clearDashSoloPills();
     }
 
     sampleHarmonyBeatIndex += 1;
@@ -3475,6 +3509,66 @@ function progRefreshCifras() {
 }
 
 /**
+ * Painel «Ao vivo» no topo: cifra grande + notas da harmonia (e sincronização
+ * das pills quando o loop de amostras não está a actualizar o realce rítmico).
+ */
+function refreshPlayheadDashboard() {
+  const big = document.getElementById("dashChordSymbol");
+  const meta = document.getElementById("dashChordMeta");
+  if (!big || !meta) return;
+
+  const tcp = currentTonicPc();
+  const baseOct = slotsPlaybackBaseOct();
+  const muteHarm = harmonyChordSamplesMuted();
+
+  if (progState.enabled && progState.resolved.length) {
+    const barIdx = Math.floor(progState.beatCounter / PROG_BEATS_PER_BAR);
+    const at = stepAtBar(progState.resolved, barIdx);
+    if (!at?.step?.chord) {
+      big.textContent = "—";
+      meta.textContent = "Sequência activa, mas sem acorde resolvido neste compasso.";
+      if (!sampleStepTimer) clearHarmonyHearVisuals();
+      return;
+    }
+    const cifra = progFormatCifra(at.step.chord);
+    big.textContent = cifra || "—";
+    const chordLabel = at.step.label;
+    const scaleLabel = SCALE_TYPES[at.step.scale]?.label || at.step.scale;
+    const totalBars = progState.resolved.reduce((s, st) => s + st.bars, 0);
+    let metaLine = `${chordLabel} · ${scaleLabel} · Compasso ${at.barInStep + 1}/${at.step.bars} · Step ${at.index + 1} · Ciclo: ${totalBars} comp.`;
+    if (muteHarm) metaLine += " · Sample do acorde em silêncio";
+    meta.textContent = metaLine;
+    if (!sampleStepTimer) {
+      const midis = chordMidisAbsolute(at.step.chord, baseOct);
+      renderHarmonyHearPillsFromMidis(midis);
+    }
+    return;
+  }
+
+  const harmId = document.getElementById("harmonyBase")?.value ?? "off";
+  if (harmId === "off") {
+    big.textContent = "—";
+    meta.textContent =
+      "Ligue a harmonia base (Graus diatónicos) ou active uma sequência de acordes para ver o acorde e as notas.";
+    if (!sampleStepTimer) clearHarmonyHearVisuals();
+    return;
+  }
+
+  const midis = harmonyMidis(tcp, effectiveStaticHarmonyIvals(), harmId, baseOct);
+  const pf = preferFlats();
+  const desc = describeActiveSlotsChord(midis, pf);
+  big.textContent = desc.head;
+  const scaleLab = SCALE_TYPES[effectiveSoloScaleKey()]?.label || "—";
+  let metaLine = desc.detail ? `${desc.detail} · Escala solo: ${scaleLab}` : `Harmonia: ${harmId} · Escala solo: ${scaleLab}`;
+  if (muteHarm) metaLine += " · Sample do acorde em silêncio";
+  meta.textContent = metaLine;
+
+  if (!sampleStepTimer) {
+    renderHarmonyHearPillsFromMidis(midis);
+  }
+}
+
+/**
  * Atualiza o status textual («Compasso X/Y do step #N…») e destaca visualmente
  * o cartão do step em execução. Chamada:
  *   - a cada mudança de passo/step (em `progTickBeat`);
@@ -3486,6 +3580,8 @@ function progRefreshCifras() {
  * da progressão enquanto o utilizador lê graus / harmonia / slots.
  */
 function progRenderStatus() {
+  refreshPlayheadDashboard();
+
   const now = document.getElementById("progNowPlaying");
   if (!now) return;
   if (!progState.enabled || !progState.resolved.length) {
@@ -4349,6 +4445,9 @@ updateScaleStarLabels();
 buildSlots();
 wireGlobalControls();
 wireProgressionControls();
+progResolveFromUI();
+progRefreshCifras();
+progRenderStatus();
 updateSampleControlsEnabled();
 updateSlotsMissingNotes();
 

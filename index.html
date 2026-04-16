@@ -41,6 +41,30 @@ aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
     </div>
   </header>
 
+  <section class="playhead-dash" id="playheadDash" aria-label="Indicadores ao vivo — acorde e notas para tocar">
+    <div class="playhead-dash-header">
+      <h2 class="playhead-dash-title">Ao vivo</h2>
+      <p class="playhead-dash-sub">Acorde que soa na base e notas para acompanhar (harmonia + solo).</p>
+    </div>
+    <div class="playhead-dash-grid">
+      <div class="playhead-dash-card playhead-dash-card--chord">
+        <div class="playhead-dash-label">Acorde agora</div>
+        <div id="dashChordSymbol" class="dash-chord-symbol" aria-live="off">—</div>
+        <div id="dashChordMeta" class="dash-chord-meta" aria-live="off"></div>
+      </div>
+      <div class="playhead-dash-card playhead-dash-card--harm">
+        <div class="playhead-dash-label">Harmonia — notas do acorde</div>
+        <div id="dashHarmStrip" class="dash-note-strip dash-harm-strip" role="list" aria-live="off"></div>
+        <p class="playhead-dash-footnote">O realce segue cada nota quando o sampler toca.</p>
+      </div>
+      <div class="playhead-dash-card playhead-dash-card--solo">
+        <div class="playhead-dash-label">Solo — toque nesta batida</div>
+        <div id="dashSoloStrip" class="dash-note-strip dash-solo-strip" role="list" aria-live="off"></div>
+        <p class="playhead-dash-footnote">Figuras geradas pelo padrão e ritmo de solo activos.</p>
+      </div>
+    </div>
+  </section>
+
   <section class="panel panel-context" aria-label="Contexto tonal">
     <div class="row row-global">
       <label class="field field-hero">
