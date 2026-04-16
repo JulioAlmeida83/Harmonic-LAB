@@ -437,9 +437,9 @@ aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
         </label>
         <label class="field">
           <span>Contexto do solo</span>
-          <select id="soloContextMode" title="Solo na tonalidade usa tríade I da escala escolhida; seguir sequência usa cada acorde do editor.">
+          <select id="soloContextMode" title="«Solo na tonalidade» não precisa de «Ativar sequência». «Seguir sequência» só muda os acordes do solo quando a sequência está ligada e tem passos; senão o motor usa a mesma base que na tonalidade.">
             <option value="static_key" selected>Solo na tonalidade / escala (sem sequência)</option>
-            <option value="progression">Seguir sequência de acordes</option>
+            <option value="progression">Seguir sequência (quando activa)</option>
           </select>
         </label>
         <label class="field field-wide">

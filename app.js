@@ -361,11 +361,18 @@ function soloMidiToPlayableRange(rawMidi, chordRootPc, soloOctUi) {
 
 /**
  * Acorde + escala para o motor de solo: progressão ou tríade I na tonalidade.
+ * «Seguir sequência» só tem efeito com «Ativar sequência» e passos resolvidos;
+ * caso contrário cai na tonalidade (não é preciso ligar a progressão para ouvir solo).
  */
 function resolveSoloChordAndScale(tcp) {
   const mode = document.getElementById("soloContextMode")?.value ?? "static_key";
   const progStep = getActiveProgressionStep();
-  if (mode === "progression" && progStep?.step?.chord) {
+  const progOk =
+    mode === "progression" &&
+    progState.enabled &&
+    progState.resolved.length > 0 &&
+    progStep?.step?.chord;
+  if (progOk) {
     const chord = progStep.step.chord;
     const scaleResult = pickParentScaleForChord(chord, tcp);
     const scaleKey = scaleResult?.key || "major";
@@ -4046,13 +4053,6 @@ function wireGlobalControls() {
     const soundMode = document.getElementById("soundMode")?.value ?? "synth";
     if (soundMode !== "sample" || !audio.instrumentSampler) {
       alert("O solo improvisado usa o banco de amostras. Confirme o modo Instrumento e que o áudio está activo.");
-      return;
-    }
-    const mode = document.getElementById("soloContextMode")?.value ?? "static_key";
-    if (mode === "progression" && (!progState.enabled || !progState.resolved.length)) {
-      alert(
-        "Modo «Seguir sequência»: active «Ativar sequência» e defina passos no editor (ou use um «Preset de cena» com progressão).",
-      );
       return;
     }
     if (document.getElementById("soloAutoEnableHarmony")?.checked) {
