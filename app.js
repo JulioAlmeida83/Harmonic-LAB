@@ -1981,7 +1981,15 @@ function refreshSampleExecutionLoop() {
         if (soloChordSig !== lastSoloChordSig) {
           lastSoloChordSig = soloChordSig;
           soloPatIndex = 0;
+          if (typeof window._soloResetHighlight === "function") window._soloResetHighlight();
         }
+
+        // Range clamp: solo fica no máximo ±1 oitava da tessitura da harmonia.
+        const harmMidis = chordMidisAbsolute(chord, baseOct);
+        const harmLo = Math.min(...harmMidis);
+        const harmHi = Math.max(...harmMidis);
+        const soloLo = harmLo - 12;
+        const soloHi = harmHi + 12;
 
         const { offsets, durs } = soloRhythmOffsets(soloRhythm, beat, sampleHarmonyBeatIndex % 4);
         if (offsets.length > 0) {
@@ -1990,8 +1998,13 @@ function refreshSampleExecutionLoop() {
           const peak = Math.max(0.04, Math.min(0.2, soloVol * 0.18));
           for (let i = 0; i < degrees.length; i += 1) {
             const semitones = degrees[i];
-            const midi = clampMidi(12 * (soloOct + 1) + chord.rootPc + semitones, 24, 96);
+            const rawMidi = 12 * (soloOct + 1) + chord.rootPc + semitones;
+            const midi = wrapMidiToRange(rawMidi, soloLo, soloHi);
             audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t + offsets[i], peak, durs[i]);
+            // Avança highlight no pentagrama SVG (1 nota de cada vez)
+            if (typeof window._soloAdvanceHighlight === "function") {
+              setTimeout(() => window._soloAdvanceHighlight(), Math.max(0, offsets[i] * 1000));
+            }
           }
         }
       }
@@ -2255,6 +2268,23 @@ function populateSelects() {
       if (child.tagName === "OPTGROUP") {
         bassBank.appendChild(child.cloneNode(true));
       }
+    });
+  }
+
+  // Popula o select de exercícios de solo com os presets de SOLO_EXERCISES.
+  const soloEx = document.getElementById("soloExercise");
+  if (soloEx && typeof SOLO_EXERCISE_CATEGORIES !== "undefined" && Array.isArray(SOLO_EXERCISES)) {
+    SOLO_EXERCISE_CATEGORIES.forEach((cat) => {
+      const og = document.createElement("optgroup");
+      og.label = cat.label;
+      SOLO_EXERCISES.filter((e) => e.category === cat.key).forEach((e) => {
+        const o = document.createElement("option");
+        o.value = e.id;
+        o.textContent = e.label;
+        o.title = e.description || "";
+        og.appendChild(o);
+      });
+      if (og.children.length) soloEx.appendChild(og);
     });
   }
 }
@@ -3490,6 +3520,257 @@ function wireGlobalControls() {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", onContextChange);
   });
+
+  // ---- Solo: exercício preset loader + pentagrama SVG -----------------------
+  const soloExSelect = document.getElementById("soloExercise");
+  if (soloExSelect) {
+    soloExSelect.addEventListener("change", () => {
+      const id = soloExSelect.value;
+      if (id === "custom") return;
+      const ex = SOLO_EXERCISES.find((e) => e.id === id);
+      if (!ex) return;
+      // Carrega progressão
+      try {
+        const ctx = { tonicPc: currentTonicPc(), scaleKey: "major" };
+        const resolved = resolveSequence(ex.steps, ctx);
+        progState.enabled = true;
+        progState.resolved = resolved;
+        progState.beatCounter = 0;
+        const enabledEl = document.getElementById("progEnabled");
+        if (enabledEl) enabledEl.checked = true;
+      } catch (err) {
+        console.warn("Harmonic Lab: falha ao resolver exercício:", err);
+        return;
+      }
+      // Aplica padrão + ritmo + BPM
+      const patEl = document.getElementById("soloPattern");
+      const rhtEl = document.getElementById("soloRhythm");
+      const bpmEl = document.getElementById("globalBpm");
+      if (patEl) patEl.value = ex.soloPattern;
+      if (rhtEl) rhtEl.value = ex.soloRhythm;
+      if (bpmEl) bpmEl.value = ex.bpm;
+      // Activa solo + refresh
+      const chk = document.getElementById("soloEnabled");
+      if (chk) chk.checked = true;
+      soloPatIndex = 0;
+      lastSoloChordSig = "";
+      progResetPlayhead();
+      scheduleSyncAudio();
+      refreshSampleExecutionLoop();
+      renderSoloPentagrama();
+    });
+  }
+
+  // ---- Pentagrama SVG: mostra a sequência de notas do solo com highlight ----
+  function midiToStaffPos(midi) {
+    const oct = Math.floor(midi / 12) - 1;
+    const pc = midi % 12;
+    const diatonicMap = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6];
+    return oct * 7 + diatonicMap[pc];
+  }
+
+  function midiIsAccidental(midi) {
+    return [1, 3, 6, 8, 10].includes(midi % 12);
+  }
+
+  function renderSoloPentagrama() {
+    const wrap = document.getElementById("soloPentagrama");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+
+    // Precisamos de progressão activa e solo ligado
+    if (!progState?.enabled || !progState?.resolved?.length) return;
+    if (!document.getElementById("soloEnabled")?.checked) return;
+
+    const tcp = currentTonicPc();
+    const soloPattern = document.getElementById("soloPattern")?.value || "arp_up";
+    const soloRhythm = document.getElementById("soloRhythm")?.value || "swing";
+    const soloOct = Number(document.getElementById("soloOctave")?.value ?? 4);
+    const baseOct = slotsPlaybackBaseOct();
+    const pf = preferFlats();
+
+    // Pré-gera notas para N beats (4 compassos × 4 beats = 16 beats por acorde)
+    const allNotes = [];
+    let patIdx = 0;
+    const bpm = currentBpm();
+    const beatSec = 60 / bpm;
+
+    for (const step of progState.resolved) {
+      const chord = step.chord;
+      if (!chord || !chord.intervals) continue;
+      const scaleResult = pickParentScaleForChord(chord, tcp);
+      const scaleIvals = SCALE_TYPES[scaleResult?.key || "major"]?.intervals || SCALE_TYPES.major.intervals;
+      const harmMidis = chordMidisAbsolute(chord, baseOct);
+      const harmLo = Math.min(...harmMidis);
+      const harmHi = Math.max(...harmMidis);
+      const soloLo = harmLo - 12;
+      const soloHi = harmHi + 12;
+      const beatsInStep = (step.bars ?? 1) * 4;
+
+      const localPatIdx0 = 0; // reset per acorde
+      let localPat = 0;
+      for (let b = 0; b < beatsInStep; b += 1) {
+        const { offsets } = soloRhythmOffsets(soloRhythm, beatSec, b % 4);
+        if (!offsets.length) continue;
+        const degrees = generateSoloDegrees(soloPattern, chord.intervals, scaleIvals, localPat, offsets.length);
+        localPat += offsets.length;
+        for (let i = 0; i < degrees.length; i += 1) {
+          const rawMidi = 12 * (soloOct + 1) + chord.rootPc + degrees[i];
+          const midi = wrapMidiToRange(rawMidi, soloLo, soloHi);
+          allNotes.push({ midi, chordLabel: chord.label || pcToName(chord.rootPc, pf), beat: allNotes.length });
+        }
+      }
+    }
+
+    if (!allNotes.length) return;
+
+    // SVG dimensions
+    const noteSpacing = 36;
+    const leftPad = 40;
+    const rightPad = 20;
+    const svgW = leftPad + allNotes.length * noteSpacing + rightPad;
+    const staffLineSpacing = 10;
+    const staffTop = 30;
+    const staffH = 4 * staffLineSpacing; // 5 lines
+    const svgH = staffTop + staffH + 60; // extra for ledger + labels
+    const e4Pos = midiToStaffPos(64); // E4 = bottom line reference
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("width", svgW);
+    svg.setAttribute("height", svgH);
+    svg.setAttribute("viewBox", `0 0 ${svgW} ${svgH}`);
+    svg.style.display = "block";
+
+    // Treble clef symbol
+    const clefText = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    clefText.setAttribute("x", 4);
+    clefText.setAttribute("y", staffTop + staffH - 4);
+    clefText.setAttribute("font-size", "36");
+    clefText.setAttribute("fill", "#9aa3b2");
+    clefText.textContent = "\u{1D11E}"; // 𝄞
+    svg.appendChild(clefText);
+
+    // 5 staff lines
+    for (let i = 0; i < 5; i += 1) {
+      const y = staffTop + i * staffLineSpacing;
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", leftPad - 6);
+      line.setAttribute("x2", svgW - rightPad);
+      line.setAttribute("y1", y);
+      line.setAttribute("y2", y);
+      line.setAttribute("stroke", "rgba(255,255,255,0.2)");
+      line.setAttribute("stroke-width", "1");
+      svg.appendChild(line);
+    }
+
+    // Notes
+    allNotes.forEach((n, idx) => {
+      const staffPos = midiToStaffPos(n.midi) - e4Pos; // 0 = E4 = bottom line
+      const y = staffTop + staffH - staffPos * (staffLineSpacing / 2);
+      const x = leftPad + idx * noteSpacing;
+
+      // Ledger lines
+      if (staffPos < 0) {
+        for (let lp = -2; lp >= staffPos; lp -= 2) {
+          const ly = staffTop + staffH - lp * (staffLineSpacing / 2);
+          const ll = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          ll.setAttribute("x1", x - 8); ll.setAttribute("x2", x + 8);
+          ll.setAttribute("y1", ly); ll.setAttribute("y2", ly);
+          ll.setAttribute("stroke", "rgba(255,255,255,0.15)");
+          ll.setAttribute("stroke-width", "1");
+          svg.appendChild(ll);
+        }
+      }
+      if (staffPos > 10) {
+        for (let lp = 12; lp <= staffPos; lp += 2) {
+          const ly = staffTop + staffH - lp * (staffLineSpacing / 2);
+          const ll = document.createElementNS("http://www.w3.org/2000/svg", "line");
+          ll.setAttribute("x1", x - 8); ll.setAttribute("x2", x + 8);
+          ll.setAttribute("y1", ly); ll.setAttribute("y2", ly);
+          ll.setAttribute("stroke", "rgba(255,255,255,0.15)");
+          ll.setAttribute("stroke-width", "1");
+          svg.appendChild(ll);
+        }
+      }
+
+      // Note head
+      const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      g.setAttribute("data-note-idx", idx);
+      g.classList.add("solo-note");
+
+      const circle = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
+      circle.setAttribute("cx", x);
+      circle.setAttribute("cy", y);
+      circle.setAttribute("rx", 5);
+      circle.setAttribute("ry", 4);
+      circle.setAttribute("fill", "#6c9cff");
+      circle.setAttribute("stroke", "none");
+      g.appendChild(circle);
+
+      // Accidental
+      if (midiIsAccidental(n.midi)) {
+        const acc = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        acc.setAttribute("x", x - 12);
+        acc.setAttribute("y", y + 3);
+        acc.setAttribute("font-size", "10");
+        acc.setAttribute("fill", "#9aa3b2");
+        acc.textContent = pf ? "\u266D" : "\u266F"; // ♭ or ♯
+        g.appendChild(acc);
+      }
+
+      // Note label
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", x);
+      label.setAttribute("y", staffTop + staffH + 30);
+      label.setAttribute("text-anchor", "middle");
+      label.setAttribute("font-size", "9");
+      label.setAttribute("fill", "#9aa3b2");
+      label.setAttribute("font-family", "var(--mono), monospace");
+      label.textContent = midiNoteLabel(n.midi, pf);
+      g.appendChild(label);
+
+      svg.appendChild(g);
+    });
+
+    wrap.appendChild(svg);
+  }
+
+  // Renderiza pentagrama quando contexto muda (acorde, padrão, ritmo)
+  ["soloEnabled", "soloPattern", "soloRhythm", "soloOctave", "soloExercise"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", () => renderSoloPentagrama());
+  });
+
+  // Atualiza highlight da nota activa no pentagrama durante a execução
+  let soloNoteHighlightIdx = -1;
+  function advanceSoloPentagramaHighlight() {
+    const wrap = document.getElementById("soloPentagrama");
+    if (!wrap) return;
+    soloNoteHighlightIdx += 1;
+    const notes = wrap.querySelectorAll(".solo-note");
+    notes.forEach((g, i) => {
+      const ellipse = g.querySelector("ellipse");
+      if (!ellipse) return;
+      if (i === soloNoteHighlightIdx) {
+        ellipse.setAttribute("fill", "#ff6b4a");
+        ellipse.setAttribute("rx", "7");
+        ellipse.setAttribute("ry", "5.5");
+        g.scrollIntoView?.({ behavior: "smooth", inline: "center", block: "nearest" });
+      } else if (i < soloNoteHighlightIdx) {
+        ellipse.setAttribute("fill", "rgba(108,156,255,0.35)");
+        ellipse.setAttribute("rx", "5");
+        ellipse.setAttribute("ry", "4");
+      } else {
+        ellipse.setAttribute("fill", "#6c9cff");
+        ellipse.setAttribute("rx", "5");
+        ellipse.setAttribute("ry", "4");
+      }
+    });
+  }
+
+  // Expor para o step() chamar
+  window._soloAdvanceHighlight = advanceSoloPentagramaHighlight;
+  window._soloResetHighlight = () => { soloNoteHighlightIdx = -1; };
+  window._soloRenderPentagrama = renderSoloPentagrama;
 
   // Handler dedicado: quando o utilizador ATIVA "Silenciar acorde da harmonia",
   // queremos que o chord tail já despachado desapareça imediatamente — e não
