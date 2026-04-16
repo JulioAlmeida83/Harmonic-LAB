@@ -2122,6 +2122,40 @@ function stepAtBar(resolvedSteps, barIndex) {
 // Ambos são puros (sem estado), stateless — o caller mantém `soloPatIndex`.
 // ---------------------------------------------------------------------------
 
+/**
+ * Padrão em graus da escala (índices 0-based em `si`), ciclando como `digital_1235`.
+ * `pat` = deslocamentos em graus a partir de um `base` que avança a cada célula.
+ */
+function soloScaleDegreePat(pat, _ci, si, idx, n) {
+  const r = [];
+  for (let i = 0; i < n; i++) {
+    const group = Math.floor((idx + i) / pat.length);
+    const inPat = (idx + i) % pat.length;
+    const base = group % si.length;
+    const deg = (base + pat[inPat]) % si.length;
+    const oct = Math.floor((base + pat[inPat]) / si.length) + Math.floor(group / si.length);
+    r.push(si[deg] + 12 * oct);
+  }
+  return r;
+}
+
+/**
+ * Como `soloScaleDegreePat`, mas permite graus negativos (volta oitava com floor).
+ */
+function soloScaleDegreePatSigned(pat, _ci, si, idx, n) {
+  const r = [];
+  for (let i = 0; i < n; i++) {
+    const group = Math.floor((idx + i) / pat.length);
+    const inPat = (idx + i) % pat.length;
+    const base = group % si.length;
+    let acc = base + pat[inPat];
+    const oct = Math.floor(acc / si.length);
+    acc = ((acc % si.length) + si.length) % si.length;
+    r.push(si[acc] + 12 * oct);
+  }
+  return r;
+}
+
 const SOLO_PATTERNS = {
   /** Arpejo ascendente (chord tones, ciclo por oitavas). */
   arp_up(ci, _si, idx, n) {
@@ -2474,6 +2508,114 @@ const SOLO_PATTERNS = {
       r.push(ci[p] + 12 * baseOct + bump);
     }
     return r;
+  },
+
+  // --- Células melódicas típicas de ditado / etudes (graus da escala do acorde) ---
+  /** Ditado: 1–2–3–1 (Do–Re–Mi–Do) na escala do contexto. */
+  melodic_1231(_ci, si, idx, n) {
+    return soloScaleDegreePat([0, 1, 2, 0], _ci, si, idx, n);
+  },
+  /** Ditado: 5–3–2–1 (Sol–Mi–Re–Do) descendente na escala. */
+  melodic_5321(_ci, si, idx, n) {
+    return soloScaleDegreePatSigned([4, 2, 1, 0], _ci, si, idx, n);
+  },
+  /** Célula 1–3–5–1 (arpejo curto que fecha na tônica). */
+  melodic_1351(_ci, si, idx, n) {
+    return soloScaleDegreePat([0, 2, 4, 0], _ci, si, idx, n);
+  },
+  /** Célula 1–2–4–5 (fragmento de escala ascendente). */
+  melodic_1245(_ci, si, idx, n) {
+    return soloScaleDegreePat([0, 1, 3, 4], _ci, si, idx, n);
+  },
+  /** Célula 1–3–4–5 (salto de terça + passo conjunto). */
+  melodic_1345(_ci, si, idx, n) {
+    return soloScaleDegreePat([0, 2, 3, 4], _ci, si, idx, n);
+  },
+  /** Célula 1–5–3–1 (salto à quinta e regresso, estilo esboço). */
+  melodic_1531(_ci, si, idx, n) {
+    return soloScaleDegreePatSigned([0, 4, 2, 0], _ci, si, idx, n);
+  },
+  /** Turno: grau — vizinho superior — grau — vizinho inferior — grau. */
+  melodic_turn_scale(_ci, si, idx, n) {
+    return soloScaleDegreePatSigned([0, 1, 0, -1, 0], _ci, si, idx, n);
+  },
+  /** Saltos de quinta justa na escala (1→5→1→5…). */
+  melodic_fifths_alternating(_ci, si, idx, n) {
+    return soloScaleDegreePatSigned([0, 4, 0, 4], _ci, si, idx, n);
+  },
+  /** Escada ascendente curta 1–2–3–4. */
+  melodic_1234(_ci, si, idx, n) {
+    return soloScaleDegreePat([0, 1, 2, 3], _ci, si, idx, n);
+  },
+  /** Escada descendente 4–3–2–1. */
+  melodic_4321(_ci, si, idx, n) {
+    return soloScaleDegreePatSigned([3, 2, 1, 0], _ci, si, idx, n);
+  },
+  /** Digital 1–3–5–8 (até a oitava do grau 1 na escala). */
+  melodic_1358(_ci, si, idx, n) {
+    return soloScaleDegreePat([0, 2, 4, 7], _ci, si, idx, n);
+  },
+  /** Digital 1–2–1–5 (célula “bounce” + quinta). */
+  melodic_1215(_ci, si, idx, n) {
+    return soloScaleDegreePat([0, 1, 0, 4], _ci, si, idx, n);
+  },
+  /** Pares de terças ascendentes na escala (1–3, 2–4, 3–5…). */
+  melodic_third_pairs_up(_ci, si, idx, n) {
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const pairBase = Math.floor((idx + i) / 2);
+      const inPair = (idx + i) % 2;
+      const base = pairBase % si.length;
+      const oct0 = Math.floor(pairBase / si.length);
+      const d2 = (base + 2) % si.length;
+      const oct1 = oct0 + Math.floor((base + 2) / si.length);
+      if (inPair === 0) r.push(si[base] + 12 * oct0);
+      else r.push(si[d2] + 12 * oct1);
+    }
+    return r;
+  },
+  /** Tríade em arpejo tipo Alberti: R–5ª–3ª–5ª. */
+  alberti_triad(ci, _si, idx, n) {
+    if (ci.length < 3) return SOLO_PATTERNS.triad_burst(ci, _si, idx, n);
+    const R = ci[0];
+    const t3 = ci[1];
+    const f5 = ci[2];
+    const seq = [R, f5, t3, f5];
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      r.push(seq[(idx + i) % 4] + 12 * Math.floor((idx + i) / 4));
+    }
+    return r;
+  },
+  /** Cromática ascendente curta (4 notas) a partir da raiz do acorde. */
+  chrom_crawl_up(ci, _si, idx, n) {
+    const seq = [0, 1, 2, 3];
+    const r0 = ci[0] ?? 0;
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const k = idx + i;
+      r.push(r0 + seq[k % seq.length] + 12 * Math.floor(k / seq.length));
+    }
+    return r;
+  },
+  /** Cromática descendente curta a partir da raiz do acorde. */
+  chrom_crawl_down(ci, _si, idx, n) {
+    const seq = [0, -1, -2, -3];
+    const r0 = ci[0] ?? 0;
+    const r = [];
+    for (let i = 0; i < n; i++) {
+      const k = idx + i;
+      r.push(r0 + seq[k % seq.length] + 12 * Math.floor(k / seq.length));
+    }
+    return r;
+  },
+  /** 1–3–5 na escala (Do–Mi–Sol diatónico). */
+  melodic_135_scale(_ci, si, idx, n) {
+    return soloScaleDegreePat([0, 2, 4], _ci, si, idx, n);
+  },
+  /** 3–5–1 (Mi–Sol–Do) na escala. */
+  melodic_351_scale(_ci, si, idx, n) {
+    return soloScaleDegreePatSigned([2, 4, 0], _ci, si, idx, n);
   },
 };
 

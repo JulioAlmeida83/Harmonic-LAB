@@ -68,9 +68,44 @@ aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
   <section class="notation-panel" id="notationPanel" aria-label="Pentagrama — notas a executar">
     <div class="notation-panel-head">
       <h3 class="notation-panel-title">Pentagrama</h3>
-      <p class="notation-panel-sub">Clave de Sol: harmonia (azul) e frase de solo (verde). Nas pills, oitavas não são mostradas; tons mais graves ou mais agudos que a zona média do acorde usam azul-claro ou âmbar.</p>
+      <p class="notation-panel-sub">
+        Clave de Sol: uma pauta com as notas <strong>realmente tocadas</strong> na última batida (harmonia, slots, baixo, solo, tônica) em modo amostra.
+        A transposição escrita só mexe na partitura (som continua em concerto). O teto MIDI desce oitavas nos agudos antes de tocar.
+        À direita, escalas candidatas em que o acorde da sequência (ou da harmonia base) se encaixa sobre a tônica global.
+      </p>
+      <div class="notation-panel-tools row row-global">
+        <label class="field field-compact">
+          <span>Partitura escrita</span>
+          <select id="writtenTranspose" title="Som real = concerto. +2 Si♭: clarinete / trompete em Si♭. +3 Mi♭: sax alto.">
+            <option value="0" selected>Concerto (0)</option>
+            <option value="2">Si♭ (+2)</option>
+            <option value="3">Mi♭ (+3)</option>
+            <option value="7">Fá (+7) trompa em Fá</option>
+          </select>
+        </label>
+        <button type="button" id="btnTransposeBb" class="btn btn-sm" title="Partitura +2 semitons (instrumentos em Si♭)">Bb</button>
+        <label class="field field-compact">
+          <span>Teto MIDI (agudos)</span>
+          <input
+            type="number"
+            id="playbackMidiCeiling"
+            min="24"
+            max="127"
+            value="127"
+            title="Notas acima deste MIDI (concerto) descem por oitavas ao tocar. 127 = sem limite prático."
+          />
+        </label>
+      </div>
     </div>
-    <div id="notationStaffHost" class="notation-staff-host" role="img" aria-live="off"></div>
+    <div class="notation-panel-body">
+      <div id="notationStaffHost" class="notation-staff-host" role="img" aria-live="off"></div>
+      <aside class="notation-edu-scales" id="notationEduScales" aria-label="Escalas em que o acorde se insere">
+        <h4 class="notation-edu-scales-title">Escalas na tônica</h4>
+        <p class="notation-edu-scales-context" id="notationEduChordContext">—</p>
+        <ul class="notation-edu-scales-list" id="notationEduScalesList"></ul>
+        <p class="notation-edu-scales-foot" id="notationEduFoot"></p>
+      </aside>
+    </div>
   </section>
 
   <section class="panel panel-context" aria-label="Contexto tonal">
@@ -465,6 +500,10 @@ aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
             <option value="prog_pop_ivvi">Pop: I–V–vi–IV + solo swing</option>
             <option value="prog_blues12">Blues 12 comp. + mixolídio / pent</option>
             <option value="prog_iiV_I">Jazz: II–V–I + padrão digital</option>
+            <option value="static_dictation_1231">Ditado: 1–2–3–1 + semínimas + I maior</option>
+            <option value="static_dictation_5321">Ditado: 5–3–2–1 + semínimas + I maior</option>
+            <option value="static_dictation_alberti">Ditado: Alberti (R–5–3–5) + colcheias</option>
+            <option value="static_dictation_turn">Ditado: turno na escala + dórico</option>
           </select>
         </label>
         <label class="field">
@@ -534,6 +573,26 @@ aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
               <option value="digital_3215">Digital 3-2-1-5</option>
               <option value="root_tritone">Raiz e trítono</option>
               <option value="octave_wave">Onda de oitavas no acorde</option>
+            </optgroup>
+            <optgroup label="Células melódicas (ditado / etudes)">
+              <option value="melodic_1231">1–2–3–1 (Do–Re–Mi–Do)</option>
+              <option value="melodic_5321">5–3–2–1 (Sol–Mi–Re–Do)</option>
+              <option value="melodic_1234">1–2–3–4 (escada curta)</option>
+              <option value="melodic_4321">4–3–2–1 (descida)</option>
+              <option value="melodic_1351">1–3–5–1 (arpejo curto)</option>
+              <option value="melodic_1358">1–3–5–8 (até oitava)</option>
+              <option value="melodic_1531">1–5–3–1 (salto e fecho)</option>
+              <option value="melodic_1245">1–2–4–5</option>
+              <option value="melodic_1345">1–3–4–5</option>
+              <option value="melodic_1215">1–2–1–5 (bounce + quinta)</option>
+              <option value="melodic_135_scale">1–3–5 (tríade na escala)</option>
+              <option value="melodic_351_scale">3–5–1 (Mi–Sol–Do)</option>
+              <option value="melodic_turn_scale">Turno (vizinho cromático diatónico)</option>
+              <option value="melodic_fifths_alternating">Quintas alternadas (1–5)</option>
+              <option value="melodic_third_pairs_up">Terças paralelas ascendentes</option>
+              <option value="alberti_triad">Alberti (R–5–3–5 no acorde)</option>
+              <option value="chrom_crawl_up">Cromática curta a subir (raiz)</option>
+              <option value="chrom_crawl_down">Cromática curta a descer (raiz)</option>
             </optgroup>
           </select>
         </label>

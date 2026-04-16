@@ -422,6 +422,42 @@ function soloMidiToPlayableRange(rawMidi, chordRootPc, soloOctUi) {
   return clampMidi(wrapMidiToRange(rawMidi, lo, hi));
 }
 
+/** Teto MIDI (0–127) para samples: notas acima descem por oitavas. 127 ≈ sem limite. */
+function readPlaybackMidiCeiling() {
+  const v = Number(document.getElementById("playbackMidiCeiling")?.value ?? 127);
+  if (!Number.isFinite(v)) return 127;
+  return Math.max(24, Math.min(127, Math.round(v)));
+}
+
+/**
+ * Encaixa a tessitura para o intervalo [chão opcional, teto].
+ * O chão só actua se `#playbackMidiFloor` existir e for > 0.
+ */
+function clampPlaybackMidiToRange(midi) {
+  let m = clampMidi(midi);
+  const hi = readPlaybackMidiCeiling();
+  while (m > hi) m -= 12;
+  const floorEl = document.getElementById("playbackMidiFloor");
+  const loRaw = floorEl ? Number(floorEl.value) : 0;
+  const lo = Number.isFinite(loRaw) && loRaw > 0 ? Math.max(12, Math.min(84, Math.round(loRaw))) : null;
+  if (lo != null) {
+    while (m < lo) m += 12;
+    while (m > hi) m -= 12;
+  }
+  return clampMidi(m);
+}
+
+/** Transposição escrita do pentagrama em semitons relativos ao som real (concerto). +2 = partitura típica em Si♭. */
+function readWrittenTransposeSemitones() {
+  const v = Number(document.getElementById("writtenTranspose")?.value ?? 0);
+  if (!Number.isFinite(v)) return 0;
+  return Math.max(-24, Math.min(24, Math.round(v)));
+}
+
+function concertToWrittenMidi(concertMidi) {
+  return clampMidi(concertMidi + readWrittenTransposeSemitones());
+}
+
 /**
  * Acorde + escala para o motor de solo: progressão ou tríade I na tonalidade.
  * «Seguir sequência» só tem efeito com «Ativar sequência» e passos resolvidos;
@@ -604,6 +640,70 @@ function applySoloScenePreset(key) {
       setVal("soloPattern", "digital_1235");
       setVal("soloRhythm", "swing");
       setVal("scaleType", "major");
+    },
+    static_dictation_1231: () => {
+      setVal("soloContextMode", "static_key");
+      const pe0 = document.getElementById("progEnabled");
+      if (pe0?.checked) {
+        pe0.checked = false;
+        pe0.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      setVal("soloScaleType", "");
+      setVal("scaleType", "major");
+      setVal("soloAlignHarmonyWithScale", true);
+      setVal("harmonyBase", "deg1");
+      setVal("harmonyStyle", "sustain");
+      setVal("progHarmonyStyle", "sustain");
+      setVal("soloPattern", "melodic_1231");
+      setVal("soloRhythm", "quarters");
+    },
+    static_dictation_5321: () => {
+      setVal("soloContextMode", "static_key");
+      const pe0 = document.getElementById("progEnabled");
+      if (pe0?.checked) {
+        pe0.checked = false;
+        pe0.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      setVal("soloScaleType", "");
+      setVal("scaleType", "major");
+      setVal("soloAlignHarmonyWithScale", true);
+      setVal("harmonyBase", "deg1");
+      setVal("harmonyStyle", "sustain");
+      setVal("progHarmonyStyle", "sustain");
+      setVal("soloPattern", "melodic_5321");
+      setVal("soloRhythm", "quarters");
+    },
+    static_dictation_alberti: () => {
+      setVal("soloContextMode", "static_key");
+      const pe0 = document.getElementById("progEnabled");
+      if (pe0?.checked) {
+        pe0.checked = false;
+        pe0.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      setVal("soloScaleType", "");
+      setVal("scaleType", "major");
+      setVal("soloAlignHarmonyWithScale", true);
+      setVal("harmonyBase", "deg1");
+      setVal("harmonyStyle", "pluck");
+      setVal("progHarmonyStyle", "sustain");
+      setVal("soloPattern", "alberti_triad");
+      setVal("soloRhythm", "eighths");
+    },
+    static_dictation_turn: () => {
+      setVal("soloContextMode", "static_key");
+      const pe0 = document.getElementById("progEnabled");
+      if (pe0?.checked) {
+        pe0.checked = false;
+        pe0.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      setVal("soloScaleType", "dorian");
+      setVal("scaleType", "dorian");
+      setVal("soloAlignHarmonyWithScale", true);
+      setVal("harmonyBase", "deg1");
+      setVal("harmonyStyle", "sustain");
+      setVal("progHarmonyStyle", "sustain");
+      setVal("soloPattern", "melodic_turn_scale");
+      setVal("soloRhythm", "eighths");
     },
   };
   const fn = presets[key];
@@ -1086,7 +1186,8 @@ class AudioEngine {
 
     if (isSample) {
       for (let i = 0; i < freqs.length; i += 1) {
-        sampler.playNoteAt(this.scaleSampleBus, midis[i], t0 + times[i], g0 * 1.15, (durs[i] ?? 0.12) * 1.5);
+        const mPlay = clampPlaybackMidiToRange(midis[i]);
+        sampler.playNoteAt(this.scaleSampleBus, mPlay, t0 + times[i], g0 * 1.15, (durs[i] ?? 0.12) * 1.5);
       }
     } else {
       this._scheduleSynthScaleSteps(t0, freqs, times, durs, g0);
@@ -1299,9 +1400,10 @@ let sampleSlotsArpIndex = 0;
 let sampleBassPatIndex = 0;
 let soloPatIndex = 0;
 let lastSoloChordSig = "";
-/** MIDI mostrados no pentagrama (actualizados com harmonia / solo). */
+/** MIDI do acorde na faixa «ouvir harmonia» / pills (concerto). */
 let liveNotationHarmonyMidis = [];
-let liveNotationSoloMidis = [];
+/** MIDI disparados na última batida do loop de samples (concerto) — única fonte do pentagrama. */
+let liveNotationExecMidis = [];
 /** Assinatura do último acorde desenhado na faixa «ouvir harmonia». */
 let lastHarmHearStripSig = "";
 /** Token / timer do loop da escala (cada «Tocar» incrementa o token). */
@@ -1322,12 +1424,25 @@ function clearHarmonyHearTimers() {
 
 function clearHarmonyHearVisuals() {
   clearHarmonyHearTimers();
-  liveNotationHarmonyMidis = [];
-  renderLiveNotationStaff();
+  syncLiveNotationHarmonyMidis([]);
   for (const id of ["harmHearStrip", "dashHarmStrip"]) {
     const host = document.getElementById(id);
     if (host) host.innerHTML = "";
   }
+}
+
+/** Actualiza só o estado MIDI da harmonia para pills / metadados (não redesenha o pentagrama). */
+function syncLiveNotationHarmonyMidis(midis) {
+  liveNotationHarmonyMidis = Array.isArray(midis)
+    ? [...new Set(midis)].sort((a, b) => a - b)
+    : [];
+}
+
+function syncLiveNotationExecMidis(midis) {
+  liveNotationExecMidis = Array.isArray(midis)
+    ? [...new Set(midis)].sort((a, b) => a - b)
+    : [];
+  renderLiveNotationStaff();
 }
 
 function fillHarmonyHearStrip(host, midis, extraClasses) {
@@ -1350,10 +1465,10 @@ function fillHarmonyHearStrip(host, midis, extraClasses) {
 }
 
 function renderHarmonyHearPillsFromMidis(midis) {
-  liveNotationHarmonyMidis = Array.isArray(midis) ? [...new Set(midis)].sort((a, b) => a - b) : [];
-  renderLiveNotationStaff();
-  fillHarmonyHearStrip(document.getElementById("harmHearStrip"), midis, "");
-  fillHarmonyHearStrip(document.getElementById("dashHarmStrip"), midis, "dash-harm-pill");
+  syncLiveNotationHarmonyMidis(midis);
+  const arr = liveNotationHarmonyMidis;
+  fillHarmonyHearStrip(document.getElementById("harmHearStrip"), arr, "");
+  fillHarmonyHearStrip(document.getElementById("dashHarmStrip"), arr, "dash-harm-pill");
 }
 
 function clearDashSoloPills() {
@@ -1367,10 +1482,9 @@ function renderDashSoloPills(soloMidis) {
   host.innerHTML = "";
   const pf = preferFlats();
   if (Array.isArray(soloMidis) && soloMidis.length) {
-    liveNotationSoloMidis = [...new Set(soloMidis)].sort((a, b) => a - b);
-    renderLiveNotationStaff();
-    const ref = medianMidi(liveNotationSoloMidis);
-    for (const m of liveNotationSoloMidis) {
+    const uniqSolo = [...new Set(soloMidis)].sort((a, b) => a - b);
+    const ref = medianMidi(uniqSolo);
+    for (const m of uniqSolo) {
       const pill = document.createElement("span");
       pill.className = "dash-solo-pill";
       pill.setAttribute("role", "listitem");
@@ -1381,8 +1495,7 @@ function renderDashSoloPills(soloMidis) {
       host.appendChild(pill);
     }
   } else {
-    liveNotationSoloMidis = [];
-    renderLiveNotationStaff();
+    /* Pentagrama vem só do loop de samples (`liveNotationExecMidis`). */
   }
 }
 
@@ -1429,27 +1542,23 @@ function parseMidiStaffSpelling(midi, preferFl) {
   return { letter, octave, acc, name };
 }
 
-/** Pentagrama (clave de Sol): harmonia e solo a partir dos MIDI actuais. */
+/** Pentagrama (clave de Sol): só notas realmente disparadas na última batida do loop de amostras; posição = partitura escrita (transp.). */
 function renderLiveNotationStaff() {
   const host = document.getElementById("notationStaffHost");
   if (!host) return;
 
   const pf = preferFlats();
-  const harm = liveNotationHarmonyMidis;
-  const sol = liveNotationSoloMidis;
-  const hasHarm = harm.length > 0;
-  const hasSol = sol.length > 0;
-
+  const concertMidis = liveNotationExecMidis;
+  const tr = readWrittenTransposeSemitones();
   const NS = LIVE_NOTATION_NS;
   host.textContent = "";
 
   const lineGap = 14;
   const staffLeft = 52;
   const staffRight = 454;
-  const staffBottom0 = 86;
-  const rowGap = 78;
-  const rowCount = !hasHarm && !hasSol ? 1 : hasHarm && hasSol ? 2 : 1;
-  const svgH = 18 + rowCount * rowGap;
+  const staffBottom0 = 96;
+  const svgH = 168;
+  const staffTop = staffBottom0 - 4 * lineGap;
 
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("viewBox", `0 0 480 ${svgH}`);
@@ -1464,7 +1573,7 @@ function renderLiveNotationStaff() {
       line.setAttribute("x2", String(staffRight));
       line.setAttribute("y1", String(ly));
       line.setAttribute("y2", String(ly));
-      line.setAttribute("stroke", "rgba(255,255,255,0.22)");
+      line.setAttribute("stroke", "rgba(255,255,255,0.24)");
       line.setAttribute("stroke-width", "1");
       g.appendChild(line);
     }
@@ -1472,133 +1581,128 @@ function renderLiveNotationStaff() {
 
   function trebleClef(g) {
     const clef = document.createElementNS(NS, "text");
-    clef.setAttribute("x", "12");
-    clef.setAttribute("y", String(staffBottom0 - 30));
-    clef.setAttribute("font-size", "40");
+    clef.setAttribute("x", "10");
+    clef.setAttribute("y", String(staffBottom0 - 28));
+    clef.setAttribute("font-size", "42");
     clef.setAttribute("class", "notation-clef-g");
     clef.textContent = "\uD834\uDD1E";
     g.appendChild(clef);
   }
 
-  function drawNotesOnStaff(g, label, noteMidis, fill, stroke) {
-    const lab = document.createElementNS(NS, "text");
-    lab.setAttribute("x", "6");
-    lab.setAttribute("y", String(staffBottom0 - 62));
-    lab.setAttribute("fill", "var(--muted, #9aa3b2)");
-    lab.setAttribute("font-size", "10");
-    lab.textContent = label;
-    g.appendChild(lab);
+  const gRoot = document.createElementNS(NS, "g");
+  staffLines(gRoot);
+  trebleClef(gRoot);
 
-    staffLines(g);
-    trebleClef(g);
+  const title = document.createElementNS(NS, "text");
+  title.setAttribute("x", "6");
+  title.setAttribute("y", "18");
+  title.setAttribute("fill", "#9aa3b2");
+  title.setAttribute("font-size", "11");
+  title.setAttribute("font-weight", "600");
+  title.textContent =
+    tr === 0
+      ? "Esta batida · concerto (som real)"
+      : `Esta batida · escrito ${tr > 0 ? "+" : ""}${tr} semitons vs concerto`;
+  gRoot.appendChild(title);
 
-    const uniq = [...new Set(noteMidis)].sort((a, b) => a - b);
-    if (!uniq.length) return;
+  const noteFill = "rgba(255, 210, 120, 0.42)";
+  const noteStroke = "rgba(255, 228, 160, 0.95)";
 
-    const staffTop = staffBottom0 - 4 * lineGap;
-    const spread = Math.min(26, Math.max(15, Math.floor((staffRight - staffLeft - 48) / Math.max(uniq.length, 1))));
-    const blockW = (uniq.length - 1) * spread;
-    const x0 = staffLeft + Math.max(48, (staffRight - staffLeft - blockW) / 2);
-
-    const placed = [];
-    for (let i = 0; i < uniq.length; i += 1) {
-      const midi = uniq[i];
-      const sp = parseMidiStaffSpelling(midi, pf);
-      const step = letterOctaveToStaffStepFromE4(sp.letter, sp.octave);
-      const y = staffBottom0 - step * (lineGap / 2);
-      let x = x0 + i * spread;
-      for (const p of placed) {
-        if (Math.abs(p.y - y) < 5 && Math.abs(p.x - x) < 12) x += 12;
-      }
-      placed.push({ x, y });
-
-      if (y > staffBottom0 + 1 || y < staffTop - 1) {
-        const lx = document.createElementNS(NS, "line");
-        lx.setAttribute("x1", String(x - 16));
-        lx.setAttribute("x2", String(x + 18));
-        lx.setAttribute("y1", String(y));
-        lx.setAttribute("y2", String(y));
-        lx.setAttribute("stroke", "rgba(255,255,255,0.3)");
-        lx.setAttribute("stroke-width", "1");
-        g.appendChild(lx);
-      }
-
-      if (sp.acc) {
-        const ax = document.createElementNS(NS, "text");
-        ax.setAttribute("x", String(x - 19));
-        ax.setAttribute("y", String(y + 5));
-        ax.setAttribute("font-size", "16");
-        ax.setAttribute("fill", stroke);
-        ax.setAttribute("font-family", "Georgia, 'Times New Roman', serif");
-        ax.textContent = sp.acc;
-        g.appendChild(ax);
-      }
-
-      const head = document.createElementNS(NS, "ellipse");
-      head.setAttribute("cx", String(x));
-      head.setAttribute("cy", String(y));
-      head.setAttribute("rx", "7");
-      head.setAttribute("ry", "5");
-      head.setAttribute("fill", fill);
-      head.setAttribute("stroke", stroke);
-      head.setAttribute("stroke-width", "1.2");
-      g.appendChild(head);
-
-      const stemDown = step >= 3;
-      const stem = document.createElementNS(NS, "line");
-      if (stemDown) {
-        stem.setAttribute("x1", String(x + 5));
-        stem.setAttribute("x2", String(x + 5));
-        stem.setAttribute("y1", String(y + 2));
-        stem.setAttribute("y2", String(y + 28));
-      } else {
-        stem.setAttribute("x1", String(x - 5));
-        stem.setAttribute("x2", String(x - 5));
-        stem.setAttribute("y1", String(y - 2));
-        stem.setAttribute("y2", String(y - 28));
-      }
-      stem.setAttribute("stroke", stroke);
-      stem.setAttribute("stroke-width", "1.4");
-      stem.setAttribute("stroke-linecap", "round");
-      g.appendChild(stem);
-    }
-  }
-
-  const harmFill = "rgba(108, 156, 255, 0.38)";
-  const harmStroke = "rgba(140, 178, 255, 0.98)";
-  const solFill = "rgba(92, 225, 184, 0.32)";
-  const solStroke = "rgba(120, 240, 210, 0.98)";
-
-  if (!hasHarm && !hasSol) {
-    const g = document.createElementNS(NS, "g");
-    staffLines(g);
-    trebleClef(g);
+  const uniqConcert = [...new Set(concertMidis)].sort((a, b) => a - b);
+  if (!uniqConcert.length) {
     const hint = document.createElementNS(NS, "text");
-    hint.setAttribute("x", String(staffLeft + 44));
-    hint.setAttribute("y", String(staffBottom0 - 40));
-    hint.setAttribute("fill", "var(--muted, #9aa3b2)");
+    hint.setAttribute("x", String(staffLeft + 8));
+    hint.setAttribute("y", String(staffBottom0 - 38));
+    hint.setAttribute("fill", "#9aa3b2");
     hint.setAttribute("font-size", "12");
-    hint.textContent = "Ligue harmonia ou solo para ver as notas no pentagrama.";
-    g.appendChild(hint);
-    svg.appendChild(g);
-  } else if (hasHarm && hasSol) {
-    const g0 = document.createElementNS(NS, "g");
-    drawNotesOnStaff(g0, "Harmonia", harm, harmFill, harmStroke);
-    svg.appendChild(g0);
-    const g1 = document.createElementNS(NS, "g");
-    g1.setAttribute("transform", `translate(0,${rowGap})`);
-    drawNotesOnStaff(g1, "Solo", sol, solFill, solStroke);
-    svg.appendChild(g1);
-  } else if (hasHarm) {
-    const g0 = document.createElementNS(NS, "g");
-    drawNotesOnStaff(g0, "Harmonia", harm, harmFill, harmStroke);
-    svg.appendChild(g0);
-  } else {
-    const g0 = document.createElementNS(NS, "g");
-    drawNotesOnStaff(g0, "Solo", sol, solFill, solStroke);
-    svg.appendChild(g0);
+    hint.textContent =
+      "Ligue o áudio em modo amostra: o pentagrama mostra as notas tocadas em cada batida (harmonia, slots, baixo, solo).";
+    gRoot.appendChild(hint);
+    svg.appendChild(gRoot);
+    host.appendChild(svg);
+    return;
   }
 
+  const spread = Math.min(28, Math.max(16, Math.floor((staffRight - staffLeft - 56) / Math.max(uniqConcert.length, 1))));
+  const blockW = (uniqConcert.length - 1) * spread;
+  const x0 = staffLeft + Math.max(52, (staffRight - staffLeft - blockW) / 2);
+
+  const placed = [];
+  for (let i = 0; i < uniqConcert.length; i += 1) {
+    const cMidi = uniqConcert[i];
+    const wMidi = concertToWrittenMidi(cMidi);
+    const sp = parseMidiStaffSpelling(wMidi, pf);
+    const step = letterOctaveToStaffStepFromE4(sp.letter, sp.octave);
+    const y = staffBottom0 - step * (lineGap / 2);
+    let x = x0 + i * spread;
+    for (const p of placed) {
+      if (Math.abs(p.y - y) < 5 && Math.abs(p.x - x) < 12) x += 14;
+    }
+    placed.push({ x, y });
+
+    if (y > staffBottom0 + 1 || y < staffTop - 1) {
+      const lx = document.createElementNS(NS, "line");
+      lx.setAttribute("x1", String(x - 18));
+      lx.setAttribute("x2", String(x + 20));
+      lx.setAttribute("y1", String(y));
+      lx.setAttribute("y2", String(y));
+      lx.setAttribute("stroke", "rgba(255,255,255,0.34)");
+      lx.setAttribute("stroke-width", "1");
+      gRoot.appendChild(lx);
+    }
+
+    if (sp.acc) {
+      const ax = document.createElementNS(NS, "text");
+      ax.setAttribute("x", String(x - 20));
+      ax.setAttribute("y", String(y + 5));
+      ax.setAttribute("font-size", "17");
+      ax.setAttribute("fill", noteStroke);
+      ax.setAttribute("font-family", "Georgia, 'Times New Roman', serif");
+      ax.textContent = sp.acc;
+      gRoot.appendChild(ax);
+    }
+
+    const head = document.createElementNS(NS, "ellipse");
+    head.setAttribute("cx", String(x));
+    head.setAttribute("cy", String(y));
+    head.setAttribute("rx", "7.5");
+    head.setAttribute("ry", "5.2");
+    head.setAttribute("fill", noteFill);
+    head.setAttribute("stroke", noteStroke);
+    head.setAttribute("stroke-width", "1.25");
+    gRoot.appendChild(head);
+
+    const stemDown = step >= 3;
+    const stem = document.createElementNS(NS, "line");
+    if (stemDown) {
+      stem.setAttribute("x1", String(x + 5));
+      stem.setAttribute("x2", String(x + 5));
+      stem.setAttribute("y1", String(y + 2));
+      stem.setAttribute("y2", String(y + 30));
+    } else {
+      stem.setAttribute("x1", String(x - 5));
+      stem.setAttribute("x2", String(x - 5));
+      stem.setAttribute("y1", String(y - 2));
+      stem.setAttribute("y2", String(y - 30));
+    }
+    stem.setAttribute("stroke", noteStroke);
+    stem.setAttribute("stroke-width", "1.35");
+    stem.setAttribute("stroke-linecap", "round");
+    gRoot.appendChild(stem);
+
+    const cap = document.createElementNS(NS, "text");
+    cap.setAttribute("x", String(x - 10));
+    cap.setAttribute("y", String(y + 42));
+    cap.setAttribute("fill", "#c5cad6");
+    cap.setAttribute("font-size", "9");
+    cap.setAttribute("text-anchor", "middle");
+    const wLab = midiNoteLabel(wMidi, pf, "full");
+    const cLab = tr !== 0 ? ` (${midiNoteLabel(cMidi, pf, "pitch")})` : "";
+    cap.textContent = `${wLab}${cLab}`;
+    gRoot.appendChild(cap);
+  }
+
+  svg.appendChild(gRoot);
   host.appendChild(svg);
 }
 
@@ -1898,6 +2002,7 @@ function stopSampleExecutionLoop() {
   lastSoloChordSig = "";
   lastHarmHearStripSig = "";
   clearHarmonyHearVisuals();
+  syncLiveNotationExecMidis([]);
   const soloLnStop = document.getElementById("soloHearLine");
   if (soloLnStop) soloLnStop.textContent = "";
   clearDashSoloPills();
@@ -2552,6 +2657,13 @@ function refreshSampleExecutionLoop() {
     const hasActiveSlots = slotStates.some((st) => st.on);
     const slotsIsolated = slotMixMode === "isolated" && hasActiveSlots;
 
+    const execThisBeat = [];
+    const qExec = (midi) => {
+      const m = clampPlaybackMidiToRange(midi);
+      execThisBeat.push(m);
+      return m;
+    };
+
     // Drone/tônica
     if (!slotsIsolated && document.getElementById("droneOn")?.checked) {
       const midi = midiTonic(tcp, currentTonicOctave());
@@ -2561,18 +2673,18 @@ function refreshSampleExecutionLoop() {
       if (tonicStyle === "sustain") {
         if (sampleTonicNextAt <= t) {
           const longDur = 2.2;
-          audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t, peak, longDur);
+          audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, qExec(midi), t, peak, longDur);
           sampleTonicNextAt = t + 1.25;
         }
       } else if (tonicStyle === "sustain_lock") {
         if (sampleTonicNextAt <= t) {
           const lockDur = 8.0;
-          audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t, peak, lockDur);
+          audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, qExec(midi), t, peak, lockDur);
           // Reataque raro e com sobreposição para manter sensação contínua.
           sampleTonicNextAt = t + 6.8;
         }
       } else {
-        audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t, peak, dur);
+        audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, qExec(midi), t, peak, dur);
       }
     } else {
       sampleTonicNextAt = 0;
@@ -2653,9 +2765,10 @@ function refreshSampleExecutionLoop() {
         absBeat,
         peak,
         schedule: ({ midi, offset, dur, style, velMult }) => {
-          harmHearEvents.push({ midi, offset, dur });
+          const mPlay = qExec(midi);
+          harmHearEvents.push({ midi: mPlay, offset, dur });
           const p = Math.max(0.012, Math.min(perNoteCap, peak * (velMult ?? 1)));
-          audio.instrumentSampler.playNoteAt(audio.harmStabBus, midi, t + offset, p, dur, style);
+          audio.instrumentSampler.playNoteAt(audio.harmStabBus, mPlay, t + offset, p, dur, style);
         },
       });
       scheduleHarmonyHearHighlights(t, harmHearEvents, ctxNowUi);
@@ -2663,8 +2776,24 @@ function refreshSampleExecutionLoop() {
       // pontos do UI ainda podem lê-lo, e é barato atualizar.
       if (harmonyStyle === "arpeggio") sampleHarmonyArpIndex += 1;
     } else {
-      lastHarmHearStripSig = "";
-      clearHarmonyHearVisuals();
+      clearHarmonyHearTimers();
+      const displayMidis = (() => {
+        if (harmIdRaw === "off") return [];
+        const raw = progStep
+          ? chordMidisAbsolute(progStep.step.chord, baseOct)
+          : harmonyMidis(tcp, effectiveStaticHarmonyIvals(), harmIdRaw, baseOct);
+        const normH = globalThis.HLChordNormalizer
+          ? HLChordNormalizer.normalizeChord(raw, currentBankId())
+          : { midis: raw };
+        return Array.isArray(normH.midis) ? normH.midis : [];
+      })();
+      syncLiveNotationHarmonyMidis(displayMidis);
+      const uiSig = displayMidis.join(",");
+      if (uiSig !== lastHarmHearStripSig) {
+        lastHarmHearStripSig = uiSig;
+        fillHarmonyHearStrip(document.getElementById("harmHearStrip"), displayMidis, "");
+        fillHarmonyHearStrip(document.getElementById("dashHarmStrip"), displayMidis, "dash-harm-pill");
+      }
     }
 
     // Linha de baixo (pode usar harmonia ou só I se «harmonia desligada»)
@@ -2711,7 +2840,7 @@ function refreshSampleExecutionLoop() {
         // Se o user escolheu banco dedicado para o baixo, usa bassSampler;
         // caso contrário cai no sampler principal (comportamento histórico).
         const bassSampler = audio.bassSampler || audio.instrumentSampler;
-        bassSampler.playNoteAt(audio.scaleSampleBus, bMidi, t + 0.006, bPeak, bDur, hStyle);
+        bassSampler.playNoteAt(audio.scaleSampleBus, qExec(bMidi), t + 0.006, bPeak, bDur, hStyle);
       }
     }
 
@@ -2728,7 +2857,7 @@ function refreshSampleExecutionLoop() {
         const slotDur = Math.max(0.1, Math.min(0.34, beat * 0.45));
         const pk = peak / Math.sqrt(notes.length);
         notes.forEach((midi) => {
-          audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t, pk, slotDur, "arpeggio");
+          audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, qExec(midi), t, pk, slotDur, "arpeggio");
         });
       }
     } else if (style === "arpeggio_full") {
@@ -2741,7 +2870,7 @@ function refreshSampleExecutionLoop() {
         const noteDur = Math.min(0.32, gap * 2.6);
         const pk = peak / Math.sqrt(notes.length);
         notes.forEach((midi, i) => {
-          audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t + i * gap, pk, noteDur, "arpeggio");
+          audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, qExec(midi), t + i * gap, pk, noteDur, "arpeggio");
         });
       }
     } else {
@@ -2750,7 +2879,7 @@ function refreshSampleExecutionLoop() {
         const notes = chordMidisFromSlotState(st, tcp, ivals, baseOct);
         const pk = peak / Math.sqrt(notes.length);
         notes.forEach((midi) => {
-          audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t, pk, dur, style);
+          audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, qExec(midi), t, pk, dur, style);
         });
       });
     }
@@ -2790,7 +2919,7 @@ function refreshSampleExecutionLoop() {
             for (let i = 0; i < degrees.length; i += 1) {
               const semitones = degrees[i];
               const rawMidi = 12 * (soloOct + 1) + chord.rootPc + semitones;
-              const midi = soloMidiToPlayableRange(rawMidi, chord.rootPc, soloOct);
+              const midi = qExec(soloMidiToPlayableRange(rawMidi, chord.rootPc, soloOct));
               soloMidisPlayed.push(midi);
               audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t + attacks[i].off, peak, attacks[i].dur);
             }
@@ -2818,6 +2947,7 @@ function refreshSampleExecutionLoop() {
       clearDashSoloPills();
     }
 
+    syncLiveNotationExecMidis(execThisBeat);
     sampleHarmonyBeatIndex += 1;
   };
 
@@ -3575,9 +3705,10 @@ function syncAudio() {
         absBeat: 0,
         peak: stabPeak,
         schedule: ({ midi, offset, dur, style: st, velMult }) => {
+          const mPlay = clampPlaybackMidiToRange(midi);
           audio.instrumentSampler.playNoteAt(
             audio.harmStabBus,
-            midi,
+            mPlay,
             t + offset,
             stabPeak * (velMult ?? 1),
             Math.min(0.4, dur),
@@ -3676,6 +3807,9 @@ const PROG_AUTO_SCALE_CANDIDATES = [
   "harmonic_minor",
   "melodic_minor_asc",
 ];
+
+/** Candidatas ao painel educativo «em que escala o acorde cabe» (tônica fixa). */
+const EDU_SCALE_FIT_CANDIDATES = [...PROG_AUTO_SCALE_CANDIDATES, "pent_major", "pent_minor", "blues"];
 
 /**
  * Detecta se `val` parece um grau romano (ex.: "ii7", "bVII", "V7/V") ou um
@@ -3878,13 +4012,140 @@ function progRefreshCifras() {
 }
 
 /**
+ * Contexto do acorde (classes de altura relativas à tônica da app) para o painel
+ * educativo ao lado do pentagrama.
+ */
+function collectEduScaleFitContext() {
+  const tcp = currentTonicPc();
+  const pf = preferFlats();
+  const tonicName = pcToName(tcp, pf);
+  if (progState.enabled && progState.resolved.length) {
+    const barIdx = Math.floor(progState.beatCounter / PROG_BEATS_PER_BAR);
+    const at = stepAtBar(progState.resolved, barIdx);
+    const ch = at?.step?.chord;
+    if (ch?.intervals?.length && ch.rootPc != null) {
+      const relPcs = ch.intervals.map((i) => (ch.rootPc - tcp + i + 12) % 12);
+      const cifra = progFormatCifra(ch);
+      const stepScale = at.step.scale && SCALE_TYPES[at.step.scale] ? at.step.scale : null;
+      const stepScaleLab = stepScale ? SCALE_TYPES[stepScale].label : "";
+      const parts = [
+        `Tônica global: ${tonicName}.`,
+        at.step.label ? `Passo: ${at.step.label}.` : null,
+        stepScaleLab ? `Escala definida no passo: ${stepScaleLab}.` : null,
+      ].filter(Boolean);
+      return {
+        relPcs,
+        title: cifra || at.step.label || "Acorde da sequência",
+        detail: parts.join(" "),
+        extraScaleKeys: stepScale ? [stepScale] : [],
+      };
+    }
+    return {
+      relPcs: null,
+      title: "Sequência activa",
+      detail: "Neste compasso ainda não há acorde resolvido para analisar.",
+      extraScaleKeys: [],
+    };
+  }
+  const harmId = document.getElementById("harmonyBase")?.value ?? "off";
+  if (harmId === "off") {
+    return {
+      relPcs: null,
+      title: "—",
+      detail: "Active a sequência de acordes ou a harmonia base (graus diatónicos) para ver escalas candidatas.",
+      extraScaleKeys: [],
+    };
+  }
+  const arr = currentChordPCsArray();
+  if (!arr?.length) {
+    return { relPcs: null, title: "—", detail: "Harmonia sem notas reconhecidas.", extraScaleKeys: [] };
+  }
+  return {
+    relPcs: arr,
+    title: "Harmonia base (acorde de referência)",
+    detail: `Tônica global: ${tonicName}. Graus diatônicos na referência maior (comportamento histórico da harmonia base).`,
+    extraScaleKeys: [],
+  };
+}
+
+/** Lista escalas candidatas com melhor encaixe; empates em ★ mostram-se todos. */
+function computeEduFittingScaleRows(relPcs, extraScaleKeys = []) {
+  const scaleTypeVal = document.getElementById("scaleType")?.value;
+  const soloScaleVal = document.getElementById("soloScaleType")?.value;
+  const cand = [...new Set([...EDU_SCALE_FIT_CANDIDATES, ...extraScaleKeys, scaleTypeVal, soloScaleVal].filter(Boolean))].filter(
+    (k) => SCALE_TYPES[k],
+  );
+  const scored = cand
+    .map((k) => ({
+      key: k,
+      r: rateScaleAgainstChord(k, relPcs),
+      label: SCALE_TYPES[k].label || k,
+    }))
+    .sort((a, b) => b.r - a.r || a.label.localeCompare(b.label, "pt"));
+  const maxR = scored.length ? Math.max(...scored.map((s) => s.r)) : 0;
+  let rows = scored.filter((s) => s.r === maxR && s.r > 0);
+  if (!rows.length && scored.length) {
+    rows = scored.filter((s) => s.r > 0).slice(0, 4);
+  }
+  if (!rows.length && scored.length) {
+    rows = scored.slice(0, 5);
+  }
+  let foot = "";
+  if (maxR >= 2 && rows.length > 1) {
+    foot =
+      "Várias escalas empatam com a melhor pontuação (★): qualquer uma pode servir de referência melódica; a escolha depende do estilo e da linha que quiser evitar (notas de evitação).";
+  } else if (maxR >= 2) {
+    foot = "Melhor encaixe entre as escalas candidatas para as classes de altura deste acorde sobre a tônica actual.";
+  } else if (maxR === 1) {
+    foot =
+      "Encaixe parcial: há graus em falta na escala ou notas de evitação (semitom acima de uma nota do acorde). Compare com outras candidatas na lista.";
+  } else if (scored.length) {
+    foot =
+      "Pontuação baixa com a ordem actual das alturas relativas; trate a primeira nota como fundamental na análise automática. Experimente outro modo ou confirme o acorde no passo.";
+  }
+  return { rows, foot };
+}
+
+function renderNotationEduScalePanel() {
+  const subEl = document.getElementById("notationEduChordContext");
+  const listEl = document.getElementById("notationEduScalesList");
+  const footEl = document.getElementById("notationEduFoot");
+  if (!subEl || !listEl || !footEl) return;
+
+  const ctx = collectEduScaleFitContext();
+  subEl.textContent = `${ctx.title}${ctx.detail ? ` — ${ctx.detail}` : ""}`;
+  listEl.innerHTML = "";
+  footEl.textContent = "";
+
+  if (!ctx.relPcs?.length) {
+    return;
+  }
+
+  const { rows, foot } = computeEduFittingScaleRows(ctx.relPcs, ctx.extraScaleKeys || []);
+  for (const row of rows) {
+    const li = document.createElement("li");
+    const stars = document.createElement("span");
+    stars.className = "edu-scale-stars";
+    stars.textContent = scaleStarsRender(row.r);
+    const name = document.createElement("span");
+    name.className = "edu-scale-name";
+    name.textContent = row.label;
+    li.appendChild(stars);
+    li.appendChild(name);
+    listEl.appendChild(li);
+  }
+  footEl.textContent = foot;
+}
+
+/**
  * Painel «Ao vivo» no topo: cifra grande + notas da harmonia (e sincronização
  * das pills quando o loop de amostras não está a actualizar o realce rítmico).
  */
 function refreshPlayheadDashboard() {
   const big = document.getElementById("dashChordSymbol");
   const meta = document.getElementById("dashChordMeta");
-  if (!big || !meta) return;
+  try {
+    if (!big || !meta) return;
 
   const tcp = currentTonicPc();
   const baseOct = slotsPlaybackBaseOct();
@@ -3896,7 +4157,15 @@ function refreshPlayheadDashboard() {
     if (!at?.step?.chord) {
       big.textContent = "—";
       meta.textContent = "Sequência activa, mas sem acorde resolvido neste compasso.";
-      if (!sampleStepTimer) clearHarmonyHearVisuals();
+      if (!sampleStepTimer) {
+        clearHarmonyHearVisuals();
+      } else {
+        clearHarmonyHearTimers();
+        lastHarmHearStripSig = "";
+        syncLiveNotationHarmonyMidis([]);
+        fillHarmonyHearStrip(document.getElementById("harmHearStrip"), [], "");
+        fillHarmonyHearStrip(document.getElementById("dashHarmStrip"), [], "dash-harm-pill");
+      }
       return;
     }
     const cifra = progFormatCifra(at.step.chord);
@@ -3907,9 +4176,11 @@ function refreshPlayheadDashboard() {
     let metaLine = `${chordLabel} · ${scaleLabel} · Compasso ${at.barInStep + 1}/${at.step.bars} · Step ${at.index + 1} · Ciclo: ${totalBars} comp.`;
     if (muteHarm) metaLine += " · Sample do acorde em silêncio";
     meta.textContent = metaLine;
+    const midis = chordMidisAbsolute(at.step.chord, baseOct);
+    syncLiveNotationHarmonyMidis(midis);
     if (!sampleStepTimer) {
-      const midis = chordMidisAbsolute(at.step.chord, baseOct);
-      renderHarmonyHearPillsFromMidis(midis);
+      fillHarmonyHearStrip(document.getElementById("harmHearStrip"), midis, "");
+      fillHarmonyHearStrip(document.getElementById("dashHarmStrip"), midis, "dash-harm-pill");
     }
     return;
   }
@@ -3919,7 +4190,15 @@ function refreshPlayheadDashboard() {
     big.textContent = "—";
     meta.textContent =
       "Ligue a harmonia base (Graus diatónicos) ou active uma sequência de acordes para ver o acorde e as notas.";
-    if (!sampleStepTimer) clearHarmonyHearVisuals();
+    if (!sampleStepTimer) {
+      clearHarmonyHearVisuals();
+    } else {
+      clearHarmonyHearTimers();
+      lastHarmHearStripSig = "";
+      syncLiveNotationHarmonyMidis([]);
+      fillHarmonyHearStrip(document.getElementById("harmHearStrip"), [], "");
+      fillHarmonyHearStrip(document.getElementById("dashHarmStrip"), [], "dash-harm-pill");
+    }
     return;
   }
 
@@ -3936,8 +4215,13 @@ function refreshPlayheadDashboard() {
   if (muteHarm) metaLine += " · Sample do acorde em silêncio";
   meta.textContent = metaLine;
 
+  syncLiveNotationHarmonyMidis(midis);
   if (!sampleStepTimer) {
-    renderHarmonyHearPillsFromMidis(midis);
+    fillHarmonyHearStrip(document.getElementById("harmHearStrip"), midis, "");
+    fillHarmonyHearStrip(document.getElementById("dashHarmStrip"), midis, "dash-harm-pill");
+  }
+  } finally {
+    renderNotationEduScalePanel();
   }
 }
 
@@ -4576,6 +4860,19 @@ function wireGlobalControls() {
     masterGainEl.addEventListener("input", () => {
       applyMasterGainFromUI();
       updateSliderValueLabel(masterGainEl);
+    });
+  }
+
+  const writtenTransposeEl = document.getElementById("writtenTranspose");
+  if (writtenTransposeEl) writtenTransposeEl.addEventListener("change", () => renderLiveNotationStaff());
+  const btnTransposeBbEl = document.getElementById("btnTransposeBb");
+  if (btnTransposeBbEl) {
+    btnTransposeBbEl.addEventListener("click", () => {
+      const s = document.getElementById("writtenTranspose");
+      if (s) {
+        s.value = "2";
+        renderLiveNotationStaff();
+      }
     });
   }
 
