@@ -450,15 +450,15 @@ body.mode-simple .is-advanced {
 }
 
 .notation-panel-body {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr;
   gap: 0.85rem 1.1rem;
-  align-items: stretch;
+  align-items: start;
   justify-content: center;
 }
 
 .notation-staves-wrap {
-  flex: 1 1 min(100%, 22rem);
+  width: 100%;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -480,12 +480,22 @@ body.mode-simple .is-advanced {
 }
 
 .notation-edu-scales {
-  flex: 1 1 14rem;
-  max-width: 22rem;
+  width: 100%;
+  max-width: none;
   padding: 0.55rem 0.65rem 0.65rem;
   border-radius: 8px;
   border: 1px solid rgba(108, 156, 255, 0.22);
   background: rgba(0, 0, 0, 0.22);
+}
+
+@media (min-width: 1360px) {
+  .notation-panel-body {
+    grid-template-columns: minmax(0, 1fr) 22rem;
+  }
+
+  .notation-edu-scales {
+    max-width: 22rem;
+  }
 }
 
 .notation-edu-scales-title {
