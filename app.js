@@ -1406,6 +1406,8 @@ let liveNotationHarmonyMidis = [];
 let liveNotationStaffFourCols = [[], [], [], []];
 /** Mesma janela — só notas do padrão de harmonia (acorde por batida). */
 let liveNotationStaffChordFourCols = [[], [], [], []];
+/** Pauta principal: escala + solo (sempre visível). */
+let liveNotationStaffMelodyFourCols = [[], [], [], []];
 /** Assinatura do último acorde desenhado na faixa «ouvir harmonia». */
 let lastHarmHearStripSig = "";
 /** Token / timer do loop da escala (cada «Tocar» incrementa o token). */
@@ -1496,6 +1498,8 @@ function renderDashSoloPills(soloMidis) {
 const LIVE_NOTATION_NS = "http://www.w3.org/2000/svg";
 /** Preferência persistida: mostrar segunda pauta (só harmonia do acorde). */
 const NOTATION_SHOW_CHORD_STAFF_LS = "hl_notation_show_chord_staff";
+/** Preferência persistida: mostrar pauta de baixo/base. */
+const NOTATION_SHOW_BASS_STAFF_LS = "hl_notation_show_bass_staff";
 const STAFF_NATURAL_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 /** Faixa visual-alvo: Bb..F# em torno de C4 para manter notas junto da pauta. */
 const STAFF_VISUAL_MIDI_MIN = 58; // Bb3
@@ -1633,6 +1637,15 @@ function syncNotationChordStaffWrapVisibility() {
   wrap.setAttribute("aria-hidden", show ? "false" : "true");
 }
 
+function syncNotationBassStaffWrapVisibility() {
+  const wrap = document.getElementById("notationBassStaffWrap");
+  const cb = document.getElementById("notationShowBassStaff");
+  if (!wrap) return;
+  const show = cb ? cb.checked : true;
+  wrap.hidden = !show;
+  wrap.setAttribute("aria-hidden", show ? "false" : "true");
+}
+
 /** Preferência persistida + omissão em ecrã estreito; mantém o wrap alinhado ao checkbox. */
 function wireNotationChordStaffToggle() {
   const notationShowChordEl = document.getElementById("notationShowChordStaff");
@@ -1658,6 +1671,32 @@ function wireNotationChordStaffToggle() {
     syncNotationChordStaffWrapVisibility();
   });
   syncNotationChordStaffWrapVisibility();
+}
+
+function wireNotationBassStaffToggle() {
+  const el = document.getElementById("notationShowBassStaff");
+  if (!el) return;
+  try {
+    const v = localStorage.getItem(NOTATION_SHOW_BASS_STAFF_LS);
+    if (v === "0" || v === "1") {
+      el.checked = v === "1";
+    } else if (window.matchMedia && window.matchMedia("(max-width: 720px)").matches) {
+      el.checked = false;
+    } else {
+      el.checked = true;
+    }
+  } catch (_) {
+    el.checked = true;
+  }
+  el.addEventListener("change", () => {
+    try {
+      localStorage.setItem(NOTATION_SHOW_BASS_STAFF_LS, el.checked ? "1" : "0");
+    } catch (_) {
+      /* storage opcional */
+    }
+    syncNotationBassStaffWrapVisibility();
+  });
+  syncNotationBassStaffWrapVisibility();
 }
 
 /**
@@ -1897,10 +1936,23 @@ function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
  * de tônica/baixo/slots; actualização no tempo 1 de cada compasso em modo amostra.
  */
 function renderLiveNotationStaff() {
+  const hostMelody = document.getElementById("notationMelodyStaffHost");
   const hostRest = document.getElementById("notationStaffHost");
   const hostChord = document.getElementById("notationChordStaffHost");
   const scaleSig = keySignatureSpecFromCount(currentScaleKeySignatureCount());
   const chordSig = keySignatureSpecFromCount(currentChordKeySignatureCount());
+
+  renderNotationFourColumnStaffIntoHost(hostMelody, liveNotationStaffMelodyFourCols, {
+    titleLine: (tr) =>
+      tr === 0
+        ? "Principal · escala + solo — 4 compassos · concerto · actualizado no 1 de cada compasso"
+        : `Principal · escala + solo — 4 compassos · escrito ${tr > 0 ? "+" : ""}${tr} semitons · actualizado no 1 de cada compasso`,
+    hintEmpty:
+      "Use ▶ Tocar escala ou ▶ Tocar solo: esta pauta mostra as frases melódicas (escala e improvisação) e permanece sempre visível.",
+    noteFill: "rgba(190, 235, 170, 0.35)",
+    noteStroke: "rgba(225, 255, 205, 0.95)",
+    keySigSpec: scaleSig,
+  });
 
   renderNotationFourColumnStaffIntoHost(hostRest, liveNotationStaffFourCols, {
     titleLine: (tr) =>
@@ -1927,6 +1979,7 @@ function renderLiveNotationStaff() {
   });
 
   syncNotationChordStaffWrapVisibility();
+  syncNotationBassStaffWrapVisibility();
 }
 
 /**
@@ -3120,7 +3173,7 @@ function refreshSampleExecutionLoop() {
       if (chord && chord.intervals && chord.rootPc != null) {
         const scaleIvals = ctxSolo.scaleIvals;
         const soloPattern = document.getElementById("soloPattern")?.value || "arp_up";
-        const soloRhythm = document.getElementById("soloRhythm")?.value || "swing";
+        const soloRhythm = effectiveSoloRhythmId();
         const soloVol = Number(document.getElementById("soloVol")?.value ?? 60) / 100;
         const soloOct = Number(document.getElementById("soloOctave")?.value ?? 4);
 
@@ -3156,6 +3209,8 @@ function refreshSampleExecutionLoop() {
                 ? `Solo (frase em ${wLabel}, quantizada ao acorde): ${soloPitchLine}`
                 : "";
             }
+            setMelodyNotationFromTimedNotes(soloMidisPlayed, attacks.map((a) => a.off), beat);
+            renderLiveNotationStaff();
             renderDashSoloPills(soloMidisPlayed);
           } else if (soloHear) {
             soloHear.textContent = "";
@@ -4124,6 +4179,29 @@ function rebuildLiveNotationFourBarColumns(barStartBeat) {
   }
   liveNotationStaffFourCols = colsRest;
   liveNotationStaffChordFourCols = colsChord;
+}
+
+function clearMelodyNotationCols() {
+  liveNotationStaffMelodyFourCols = [[], [], [], []];
+}
+
+function setMelodyNotationFromTimedNotes(notes, offsetsSec, beatSec) {
+  const cols = [new Set(), new Set(), new Set(), new Set()];
+  const n = Math.min(notes.length, offsetsSec.length);
+  for (let i = 0; i < n; i += 1) {
+    const m = notes[i];
+    if (typeof m !== "number") continue;
+    const beatPos = beatSec > 0 ? offsetsSec[i] / beatSec : 0;
+    const col = Math.max(0, Math.min(3, Math.floor(beatPos / PROG_BEATS_PER_BAR)));
+    cols[col].add(clampPlaybackMidiToRange(m));
+  }
+  liveNotationStaffMelodyFourCols = cols.map((s) => [...s].sort((a, b) => a - b));
+}
+
+function effectiveSoloRhythmId() {
+  const v = document.getElementById("soloRhythm")?.value || "swing";
+  if (v === "follow_scale") return document.getElementById("seqRhythm")?.value || "swing";
+  return v;
 }
 
 /** Reconstrói colunas a partir do início do compasso actual e redesenha. */
@@ -5257,6 +5335,7 @@ function wireGlobalControls() {
   }
 
   wireNotationChordStaffToggle();
+  wireNotationBassStaffToggle();
 
   // Rótulos de valor ao lado de sliders / inputs numéricos.
   const valueDisplayIds = ["harmVol", "harmonyBassVol", "droneVol", "slotsVol", "masterGain", "globalBpm", "progVol"];
@@ -5350,6 +5429,8 @@ function wireGlobalControls() {
     midis = constrainScaleMidisAroundHarmony(midis, harmRef);
     const freqs = midis.map((m) => midiToFreq(m));
     const { times, durs, total } = rhythmPattern(rhythm, bpm, freqs.length, latch);
+    setMelodyNotationFromTimedNotes(midis, times, 60 / bpm);
+    renderLiveNotationStaff();
 
     const soundMode = document.getElementById("soundMode")?.value ?? "synth";
     let mode = "synth";

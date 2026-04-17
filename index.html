@@ -68,11 +68,15 @@
     <div class="notation-panel-head">
       <h3 class="notation-panel-title">Pentagrama</h3>
       <p class="notation-panel-sub">
-        Clave de Sol: <strong>duas pautas opcionais</strong> em quatro colunas cada (este compasso + três à frente) — uma só para a <strong>harmonia do acorde</strong> e outra para <strong>tônica, baixo e slots</strong>. Pode ocultar a do acorde para ganhar altura no ecrã. A partitura <strong>só muda no tempo 1</strong> de cada compasso em modo amostra.
+        Clave de Sol: <strong>pauta melódica principal</strong> (escala + solo) sempre visível em quatro colunas (este compasso + três à frente). As pautas de <strong>harmonia</strong> e <strong>baixo/base</strong> são opcionais para poupar espaço em ecrãs menores. A partitura <strong>só muda no tempo 1</strong> de cada compasso em modo amostra.
         A transposição escrita só mexe na partitura (som continua em concerto). O teto MIDI desce oitavas nos agudos antes de tocar.
         À direita, escalas candidatas em que o acorde da sequência (ou da harmonia base) se encaixa sobre a tônica global.
       </p>
       <div class="notation-panel-tools row row-global">
+        <label class="field field-check" title="Mostrar ou ocultar a pauta de baixo/base (drone, baixo e slots).">
+          <input type="checkbox" id="notationShowBassStaff" checked />
+          <span>Mostrar pauta de baixo/base</span>
+        </label>
         <label class="field field-check" title="Mostrar ou ocultar a segunda pauta (só as notas do padrão de harmonia do acorde). Útil em ecrãs pequenos.">
           <input type="checkbox" id="notationShowChordStaff" checked />
           <span>Mostrar pauta do acorde (harmonia)</span>
@@ -102,12 +106,16 @@
     </div>
     <div class="notation-panel-body">
       <div class="notation-staves-wrap">
+        <div class="notation-main-staff-wrap" aria-label="Pauta principal de escala e solo">
+          <div class="notation-staff-block-label">Principal · escala + solo</div>
+          <div id="notationMelodyStaffHost" class="notation-staff-host" role="img" aria-live="off"></div>
+        </div>
         <div class="notation-chord-staff-wrap" id="notationChordStaffWrap" aria-label="Pauta da harmonia do acorde">
           <div class="notation-staff-block-label">Harmonia (acorde)</div>
           <div id="notationChordStaffHost" class="notation-staff-host" role="img" aria-live="off"></div>
         </div>
-        <div class="notation-main-staff-wrap" aria-label="Pauta de tônica, baixo e slots">
-          <div class="notation-staff-block-label">Tônica · baixo · slots</div>
+        <div class="notation-main-staff-wrap" id="notationBassStaffWrap" aria-label="Pauta de tônica, baixo e slots">
+          <div class="notation-staff-block-label">Baixo/base · tônica + baixo + slots</div>
           <div id="notationStaffHost" class="notation-staff-host" role="img" aria-live="off"></div>
         </div>
       </div>
@@ -611,6 +619,9 @@
         <label class="field">
           <span>Ritmo</span>
           <select id="soloRhythm">
+            <optgroup label="Sincronização">
+              <option value="follow_scale">Igual ao ritmo da escala (Escala completa)</option>
+            </optgroup>
             <optgroup label="Pulsos básicos">
               <option value="quarters">Semínima (1 nota)</option>
               <option value="eighths">Colcheias iguais</option>
