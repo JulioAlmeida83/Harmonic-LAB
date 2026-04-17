@@ -1490,12 +1490,12 @@ function renderDashSoloPills(soloMidis) {
       if (reg) pill.classList.add(reg);
       host.appendChild(pill);
     }
-  } else {
-    /* Pentagrama: janela de 4 compassos em `liveNotationStaffFourCols`. */
   }
 }
 
 const LIVE_NOTATION_NS = "http://www.w3.org/2000/svg";
+/** Preferência persistida: mostrar segunda pauta (só harmonia do acorde). */
+const NOTATION_SHOW_CHORD_STAFF_LS = "hl_notation_show_chord_staff";
 const STAFF_NATURAL_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
 /** Ordem diatónica E F G A B | C D … a partir de E3 para indexar passos no pentagrama. */
@@ -1538,8 +1538,6 @@ function parseMidiStaffSpelling(midi, preferFl) {
   return { letter, octave, acc, name };
 }
 
-const NOTATION_SHOW_CHORD_STAFF_LS = "hl_notation_show_chord_staff";
-
 function syncNotationChordStaffWrapVisibility() {
   const wrap = document.getElementById("notationChordStaffWrap");
   const cb = document.getElementById("notationShowChordStaff");
@@ -1547,6 +1545,33 @@ function syncNotationChordStaffWrapVisibility() {
   const show = cb ? cb.checked : true;
   wrap.hidden = !show;
   wrap.setAttribute("aria-hidden", show ? "false" : "true");
+}
+
+/** Preferência persistida + omissão em ecrã estreito; mantém o wrap alinhado ao checkbox. */
+function wireNotationChordStaffToggle() {
+  const notationShowChordEl = document.getElementById("notationShowChordStaff");
+  if (!notationShowChordEl) return;
+  try {
+    const v = localStorage.getItem(NOTATION_SHOW_CHORD_STAFF_LS);
+    if (v === "0" || v === "1") {
+      notationShowChordEl.checked = v === "1";
+    } else if (window.matchMedia && window.matchMedia("(max-width: 720px)").matches) {
+      notationShowChordEl.checked = false;
+    } else {
+      notationShowChordEl.checked = true;
+    }
+  } catch (_) {
+    notationShowChordEl.checked = true;
+  }
+  notationShowChordEl.addEventListener("change", () => {
+    try {
+      localStorage.setItem(NOTATION_SHOW_CHORD_STAFF_LS, notationShowChordEl.checked ? "1" : "0");
+    } catch (_) {
+      /* storage opcional */
+    }
+    syncNotationChordStaffWrapVisibility();
+  });
+  syncNotationChordStaffWrapVisibility();
 }
 
 /**
@@ -5101,30 +5126,7 @@ function wireGlobalControls() {
     });
   }
 
-  const notationShowChordEl = document.getElementById("notationShowChordStaff");
-  if (notationShowChordEl) {
-    try {
-      const v = localStorage.getItem(NOTATION_SHOW_CHORD_STAFF_LS);
-      if (v === "0" || v === "1") {
-        notationShowChordEl.checked = v === "1";
-      } else if (window.matchMedia && window.matchMedia("(max-width: 720px)").matches) {
-        notationShowChordEl.checked = false;
-      } else {
-        notationShowChordEl.checked = true;
-      }
-    } catch (_) {
-      notationShowChordEl.checked = true;
-    }
-    notationShowChordEl.addEventListener("change", () => {
-      try {
-        localStorage.setItem(NOTATION_SHOW_CHORD_STAFF_LS, notationShowChordEl.checked ? "1" : "0");
-      } catch (_) {
-        /* storage opcional */
-      }
-      syncNotationChordStaffWrapVisibility();
-    });
-    syncNotationChordStaffWrapVisibility();
-  }
+  wireNotationChordStaffToggle();
 
   // Rótulos de valor ao lado de sliders / inputs numéricos.
   const valueDisplayIds = ["harmVol", "harmonyBassVol", "droneVol", "slotsVol", "masterGain", "globalBpm", "progVol"];

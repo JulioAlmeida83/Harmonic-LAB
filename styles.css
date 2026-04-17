@@ -1719,7 +1719,6 @@ input[type="checkbox"]:focus-visible {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-overflow: ellipsis;
   transition: color 160ms ease, border-color 160ms ease, background-color 200ms ease;
 }
 
