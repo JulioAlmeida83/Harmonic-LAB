@@ -1497,6 +1497,10 @@ const LIVE_NOTATION_NS = "http://www.w3.org/2000/svg";
 /** Preferência persistida: mostrar segunda pauta (só harmonia do acorde). */
 const NOTATION_SHOW_CHORD_STAFF_LS = "hl_notation_show_chord_staff";
 const STAFF_NATURAL_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+/** Faixa visual-alvo: Bb..F# em torno de C4 para manter notas junto da pauta. */
+const STAFF_VISUAL_MIDI_MIN = 58; // Bb3
+const STAFF_VISUAL_MIDI_MAX = 66; // F#4
+const STAFF_VISUAL_MIDI_CENTER = 60; // C4 (Dó central)
 
 /** Ordem diatónica E F G A B | C D … a partir de E3 para indexar passos no pentagrama. */
 const LIVE_STAFF_E4 = (() => {
@@ -1536,6 +1540,88 @@ function parseMidiStaffSpelling(midi, preferFl) {
   else if (rest.includes("#")) acc = "♯";
   const name = `${base}${octave}`;
   return { letter, octave, acc, name };
+}
+
+/** Mantém a nota escrita próxima da pauta (Bb3..F#4), centrando no C4. */
+function wrapNotationMidiNearStaff(rawMidi) {
+  let m = clampMidi(rawMidi);
+  while (m < STAFF_VISUAL_MIDI_MIN) m += 12;
+  while (m > STAFF_VISUAL_MIDI_MAX) m -= 12;
+  // Se houver duas oitavas possíveis na faixa, escolhe a mais perto do C4.
+  const up = m + 12 <= STAFF_VISUAL_MIDI_MAX ? m + 12 : m;
+  const dn = m - 12 >= STAFF_VISUAL_MIDI_MIN ? m - 12 : m;
+  const best =
+    Math.abs(m - STAFF_VISUAL_MIDI_CENTER) <= Math.abs(up - STAFF_VISUAL_MIDI_CENTER)
+      ? m
+      : up;
+  return Math.abs(best - STAFF_VISUAL_MIDI_CENTER) <= Math.abs(dn - STAFF_VISUAL_MIDI_CENTER)
+    ? best
+    : dn;
+}
+
+const MAJOR_KEY_SIG_COUNT_BY_PC = {
+  0: 0, // C
+  7: 1, // G
+  2: 2, // D
+  9: 3, // A
+  4: 4, // E
+  11: 5, // B
+  6: 6, // F#
+  1: 7, // C#
+  5: -1, // F
+  10: -2, // Bb
+  3: -3, // Eb
+  8: -4, // Ab
+};
+
+/** Assinatura em nº de acidentes da escala global (aprox. por modo relativo maior). */
+function currentScaleKeySignatureCount() {
+  const tonicPc = currentTonicPc();
+  const scaleKey = document.getElementById("scaleType")?.value || "major";
+  const relMajorShift = {
+    major: 0,
+    ionian: 0,
+    lydian: -5,
+    mixolydian: -7,
+    dorian: -2,
+    phrygian: -4,
+    locrian: -11,
+    natural_minor: -9,
+    harmonic_minor: -9,
+    melodic_minor_asc: -9,
+    pent_major: 0,
+    pent_minor: -9,
+    blues: -9,
+  };
+  const sh = relMajorShift[scaleKey] ?? 0;
+  const majorPc = ((tonicPc + sh) % 12 + 12) % 12;
+  return MAJOR_KEY_SIG_COUNT_BY_PC[majorPc] ?? 0;
+}
+
+/** Assinatura para acorde ativo: heurística maior/menor pela 3ª do acorde. */
+function currentChordKeySignatureCount() {
+  const at = getActiveProgressionStep();
+  let chord = at?.step?.chord || null;
+  if (!chord) {
+    const harmId = document.getElementById("harmonyBase")?.value ?? "off";
+    if (harmId !== "off") {
+      const h = harmonyMidis(currentTonicPc(), effectiveStaticHarmonyIvals(), harmId, slotsPlaybackBaseOct());
+      if (h.length) {
+        const rootPc = ((h[0] % 12) + 12) % 12;
+        const third = h[1] != null ? ((h[1] - h[0]) % 12 + 12) % 12 : 4;
+        chord = { rootPc, intervals: [0, third] };
+      }
+    }
+  }
+  if (!chord || chord.rootPc == null) return currentScaleKeySignatureCount();
+  const isMinor = (chord.intervals?.[1] ?? 4) === 3;
+  const relMajorPc = isMinor ? ((chord.rootPc + 3) % 12 + 12) % 12 : chord.rootPc;
+  return MAJOR_KEY_SIG_COUNT_BY_PC[relMajorPc] ?? 0;
+}
+
+function keySignatureSpecFromCount(count) {
+  if (!count) return { type: "none", count: 0 };
+  return count > 0 ? { type: "sharp", count } : { type: "flat", count: Math.abs(count) };
 }
 
 function syncNotationChordStaffWrapVisibility() {
@@ -1593,7 +1679,12 @@ function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
   const svgH = 188;
   const staffTop = staffBottom0 - 4 * lineGap;
   const colCount = 4;
-  const innerLo = staffLeft + 38;
+  const keySigSpec =
+    opts.keySigSpec ||
+    keySignatureSpecFromCount(typeof opts.keySigCount === "number" ? opts.keySigCount : 0);
+  const keySigCount = Math.max(0, Math.min(7, Number(keySigSpec.count) || 0));
+  const keySigWidth = keySigCount > 0 ? 14 + keySigCount * 10 : 0;
+  const innerLo = staffLeft + 38 + keySigWidth;
   const innerHi = staffRight - 6;
   const colW = (innerHi - innerLo) / colCount;
 
@@ -1629,9 +1720,31 @@ function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
     g.appendChild(clef);
   }
 
+  function drawKeySignature(g) {
+    if (!keySigCount || keySigSpec.type === "none") return;
+    const sharpSteps = [8, 5, 9, 6, 3, 7, 4]; // F5 C5 G5 D5 A4 E5 B4
+    const flatSteps = [4, 7, 3, 6, 2, 5, 1]; // B4 E5 A4 D5 G4 C5 F4
+    const steps = keySigSpec.type === "sharp" ? sharpSteps : flatSteps;
+    const symbol = keySigSpec.type === "sharp" ? "♯" : "♭";
+    const color = keySigSpec.type === "sharp" ? "#72d572" : "#ffd35a";
+    const x0 = staffLeft + 6;
+    for (let i = 0; i < keySigCount; i += 1) {
+      const t = document.createElementNS(NS, "text");
+      const y = staffBottom0 - steps[i] * (lineGap / 2);
+      t.setAttribute("x", String(x0 + i * 10));
+      t.setAttribute("y", String(y + 5));
+      t.setAttribute("font-size", "17");
+      t.setAttribute("fill", color);
+      t.setAttribute("font-family", "Georgia, 'Times New Roman', serif");
+      t.textContent = symbol;
+      g.appendChild(t);
+    }
+  }
+
   const gRoot = document.createElementNS(NS, "g");
   staffLines(gRoot);
   trebleClef(gRoot);
+  drawKeySignature(gRoot);
 
   const title = document.createElementNS(NS, "text");
   title.setAttribute("x", "6");
@@ -1698,7 +1811,7 @@ function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
 
     for (let i = 0; i < uniqConcert.length; i += 1) {
       const cMidi = uniqConcert[i];
-      const wMidi = concertToWrittenMidi(cMidi);
+      const wMidi = wrapNotationMidiNearStaff(concertToWrittenMidi(cMidi));
       const sp = parseMidiStaffSpelling(wMidi, pf);
       const stStep = letterOctaveToStaffStepFromE4(sp.letter, sp.octave);
       const y = staffBottom0 - stStep * (lineGap / 2);
@@ -1724,7 +1837,7 @@ function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
         ax.setAttribute("x", String(x - 18));
         ax.setAttribute("y", String(y + 5));
         ax.setAttribute("font-size", "16");
-        ax.setAttribute("fill", noteStroke);
+        ax.setAttribute("fill", sp.acc === "♯" ? "#72d572" : "#ffd35a");
         ax.setAttribute("font-family", "Georgia, 'Times New Roman', serif");
         ax.textContent = sp.acc;
         gRoot.appendChild(ax);
@@ -1786,6 +1899,8 @@ function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
 function renderLiveNotationStaff() {
   const hostRest = document.getElementById("notationStaffHost");
   const hostChord = document.getElementById("notationChordStaffHost");
+  const scaleSig = keySignatureSpecFromCount(currentScaleKeySignatureCount());
+  const chordSig = keySignatureSpecFromCount(currentChordKeySignatureCount());
 
   renderNotationFourColumnStaffIntoHost(hostRest, liveNotationStaffFourCols, {
     titleLine: (tr) =>
@@ -1796,6 +1911,7 @@ function renderLiveNotationStaff() {
       "Ligue o áudio em modo amostra: ao iniciar cada compasso aparecem aqui tônica, linha de baixo e slots (sem o acorde da harmonia — ver pauta separada).",
     noteFill: "rgba(255, 210, 120, 0.42)",
     noteStroke: "rgba(255, 228, 160, 0.95)",
+    keySigSpec: scaleSig,
   });
 
   renderNotationFourColumnStaffIntoHost(hostChord, liveNotationStaffChordFourCols, {
@@ -1807,6 +1923,7 @@ function renderLiveNotationStaff() {
       "Sem harmonia nesta janela (base desligada, silenciada ou slots isolados). Active a harmonia ou mostre esta pauta só quando houver espaço no ecrã.",
     noteFill: "rgba(140, 190, 255, 0.38)",
     noteStroke: "rgba(190, 220, 255, 0.95)",
+    keySigSpec: chordSig,
   });
 
   syncNotationChordStaffWrapVisibility();
