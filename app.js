@@ -1585,8 +1585,8 @@ let liveNotationStaffFourCols = [[], [], [], []];
 let liveNotationStaffChordFourCols = [[], [], [], []];
 /** Pauta principal: escala + solo (sempre visível). */
 let liveNotationStaffMelodyFourCols = [[], [], [], []];
-/** Notas melódicas actualmente soando (concerto), para highlight na pauta. */
-let liveNotationActiveMelodyMidis = new Set();
+/** Notas melódicas activas por instância visual (`col:midi`) para highlight temporal preciso. */
+let liveNotationActiveMelodyKeys = new Set();
 /** Assinatura do último acorde desenhado na faixa «ouvir harmonia». */
 let lastHarmHearStripSig = "";
 /** Token / timer do loop da escala (cada «Tocar» incrementa o token). */
@@ -1735,21 +1735,12 @@ function notationLabelPt(midi, preferFl) {
   return `${pitch}${octaveSci - 1}`;
 }
 
-/** Mantém a nota escrita próxima da pauta (Bb3..F#4), centrando no C4. */
+/** Mantém a nota escrita no intervalo visual sem inverter grave/agudo. */
 function wrapNotationMidiNearStaff(rawMidi) {
-  let m = clampMidi(rawMidi);
-  while (m < STAFF_VISUAL_MIDI_MIN) m += 12;
-  while (m > STAFF_VISUAL_MIDI_MAX) m -= 12;
-  // Se houver duas oitavas possíveis na faixa, escolhe a mais perto do C4.
-  const up = m + 12 <= STAFF_VISUAL_MIDI_MAX ? m + 12 : m;
-  const dn = m - 12 >= STAFF_VISUAL_MIDI_MIN ? m - 12 : m;
-  const best =
-    Math.abs(m - STAFF_VISUAL_MIDI_CENTER) <= Math.abs(up - STAFF_VISUAL_MIDI_CENTER)
-      ? m
-      : up;
-  return Math.abs(best - STAFF_VISUAL_MIDI_CENTER) <= Math.abs(dn - STAFF_VISUAL_MIDI_CENTER)
-    ? best
-    : dn;
+  // Clamping monotónico: notas mais agudas nunca aparecem abaixo de notas graves.
+  // Evita o efeito de "dobrar oitava" visual que desrespeita a percepção de altura.
+  const m = clampMidi(rawMidi);
+  return Math.max(STAFF_VISUAL_MIDI_MIN, Math.min(STAFF_VISUAL_MIDI_MAX, m));
 }
 
 const MAJOR_KEY_SIG_COUNT_BY_PC = {
@@ -2102,7 +2093,8 @@ function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
       head.setAttribute("cy", String(y));
       head.setAttribute("rx", "7");
       head.setAttribute("ry", "5");
-      const isActive = !!opts.activeConcertMidis?.has(cMidi);
+      const noteKey = `${colIdx}:${cMidi}`;
+      const isActive = !!opts.activeNoteKeys?.has(noteKey);
       head.setAttribute("fill", isActive ? opts.activeNoteFill || "#fff0a8" : noteFill);
       head.setAttribute("stroke", isActive ? opts.activeNoteStroke || "#fffbe0" : noteStroke);
       head.setAttribute("stroke-width", isActive ? "2" : "1.2");
@@ -2167,7 +2159,7 @@ function renderLiveNotationStaff() {
       "Use ▶ Tocar escala ou ▶ Tocar solo: esta pauta mostra as frases melódicas (escala e improvisação) e permanece sempre visível.",
     noteFill: "rgba(190, 235, 170, 0.35)",
     noteStroke: "rgba(225, 255, 205, 0.95)",
-    activeConcertMidis: liveNotationActiveMelodyMidis,
+    activeNoteKeys: liveNotationActiveMelodyKeys,
     activeNoteFill: "rgba(255, 238, 150, 0.96)",
     activeNoteStroke: "rgba(255, 251, 210, 1)",
     preserveOrder: true,
@@ -2242,8 +2234,8 @@ function clearScaleHighlights() {
   scaleHighlightTimers.length = 0;
   for (const t of melodyStaffHighlightTimers) clearTimeout(t);
   melodyStaffHighlightTimers.length = 0;
-  if (liveNotationActiveMelodyMidis.size) {
-    liveNotationActiveMelodyMidis = new Set();
+  if (liveNotationActiveMelodyKeys.size) {
+    liveNotationActiveMelodyKeys = new Set();
     renderLiveNotationStaff();
   }
   clearScaleSeqStripUi();
@@ -2366,8 +2358,6 @@ function applyScaleStudyPreset(presetId) {
     scaleSel.value = item.defaultScale;
     scaleSel.dispatchEvent(new Event("change", { bubbles: true }));
   }
-  const combo = document.getElementById("scaleStudyCombo");
-  if (combo) combo.value = "";
 }
 
 function scheduleSyncAudio() {
@@ -2506,7 +2496,7 @@ function stopSampleExecutionLoop() {
   clearHarmonyHearVisuals();
   for (const t of melodyStaffHighlightTimers) clearTimeout(t);
   melodyStaffHighlightTimers.length = 0;
-  liveNotationActiveMelodyMidis = new Set();
+  liveNotationActiveMelodyKeys = new Set();
   rebuildNotationStaffFromCurrentBeatThenRender();
   const soloLnStop = document.getElementById("soloHearLine");
   if (soloLnStop) soloLnStop.textContent = "";
@@ -3446,6 +3436,7 @@ function refreshSampleExecutionLoop() {
               soloMidisPlayed,
               attacks.map((a) => a.off),
               attacks.map((a) => a.dur),
+              beat,
               t,
               () => audioUserEnabled,
             );
@@ -4436,32 +4427,45 @@ function clearMelodyNotationCols() {
   liveNotationStaffMelodyFourCols = [[], [], [], []];
   for (const t of melodyStaffHighlightTimers) clearTimeout(t);
   melodyStaffHighlightTimers.length = 0;
-  liveNotationActiveMelodyMidis = new Set();
+  liveNotationActiveMelodyKeys = new Set();
 }
 
-function scheduleMelodyStaffHighlights(midis, offsetsSec, dursSec, t0CtxSec, tokenGuard) {
+function scheduleMelodyStaffHighlights(midis, offsetsSec, dursSec, beatSec, t0CtxSec, tokenGuard) {
   for (const t of melodyStaffHighlightTimers) clearTimeout(t);
   melodyStaffHighlightTimers.length = 0;
-  liveNotationActiveMelodyMidis = new Set();
+  liveNotationActiveMelodyKeys = new Set();
   renderLiveNotationStaff();
   const ctxNow = audio?.ctx?.currentTime ?? 0;
   const n = Math.min(midis.length, offsetsSec.length, dursSec.length);
+  let maxBeatPos = 0;
+  for (let i = 0; i < n; i += 1) {
+    const b = beatSec > 0 ? offsetsSec[i] / beatSec : 0;
+    if (Number.isFinite(b) && b > maxBeatPos) maxBeatPos = b;
+  }
+  const span = Math.max(0.001, maxBeatPos + 0.5);
+  const colFor = (offSec) => {
+    const b = beatSec > 0 ? offSec / beatSec : 0;
+    const norm = Math.max(0, Math.min(0.9999, (Number.isFinite(b) ? b : 0) / span));
+    return Math.max(0, Math.min(3, Math.floor(norm * 4)));
+  };
   for (let i = 0; i < n; i += 1) {
     const midi = Number(midis[i]);
     if (!Number.isFinite(midi)) continue;
+    const col = colFor(offsetsSec[i]);
+    const key = `${col}:${clampPlaybackMidiToRange(midi)}`;
     const startMs = Math.max(0, Math.round((t0CtxSec + offsetsSec[i] - ctxNow) * 1000));
     const endMs = Math.max(startMs + 20, Math.round((t0CtxSec + offsetsSec[i] + dursSec[i] - ctxNow) * 1000));
     melodyStaffHighlightTimers.push(
       setTimeout(() => {
         if (typeof tokenGuard === "function" && !tokenGuard()) return;
-        liveNotationActiveMelodyMidis.add(midi);
+        liveNotationActiveMelodyKeys.add(key);
         renderLiveNotationStaff();
       }, startMs),
     );
     melodyStaffHighlightTimers.push(
       setTimeout(() => {
         if (typeof tokenGuard === "function" && !tokenGuard()) return;
-        liveNotationActiveMelodyMidis.delete(midi);
+        liveNotationActiveMelodyKeys.delete(key);
         renderLiveNotationStaff();
       }, endMs),
     );
@@ -5196,7 +5200,6 @@ function wireProgressionControls() {
     const key = preset.value;
     if (key) {
       progLoadPreset(key);
-      preset.value = "";
     }
   });
 
@@ -5756,7 +5759,6 @@ function wireGlobalControls() {
       const k = soloScenePresetEl.value;
       if (k) {
         applySoloScenePreset(k);
-        soloScenePresetEl.value = "";
       }
     });
   }
@@ -5978,7 +5980,7 @@ function wireGlobalControls() {
       }
     }
 
-    scheduleMelodyStaffHighlights(midis, times, durs, t0Ui, () => myToken === scaleLoopToken);
+    scheduleMelodyStaffHighlights(midis, times, durs, 60 / bpm, t0Ui, () => myToken === scaleLoopToken);
 
     renderScaleSeqPreview(degs, midis);
     scheduleScaleSeqStripHighlights(t0Ui, times, durs, myToken, ctxNow);
