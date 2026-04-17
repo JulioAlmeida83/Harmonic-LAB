@@ -2049,7 +2049,18 @@ function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
 
   const placed = [];
   function drawColumnNotes(colIdx, concertMidis) {
-    const uniqConcert = [...new Set(concertMidis)].sort((a, b) => a - b);
+    let uniqConcert;
+    if (opts.preserveOrder) {
+      const seen = new Set();
+      uniqConcert = [];
+      for (const m of concertMidis) {
+        if (typeof m !== "number" || seen.has(m)) continue;
+        seen.add(m);
+        uniqConcert.push(m);
+      }
+    } else {
+      uniqConcert = [...new Set(concertMidis)].sort((a, b) => a - b);
+    }
     if (!uniqConcert.length) return;
     const xLo = innerLo + colIdx * colW + 5;
     const xHi = innerLo + (colIdx + 1) * colW - 5;
@@ -2159,6 +2170,7 @@ function renderLiveNotationStaff() {
     activeConcertMidis: liveNotationActiveMelodyMidis,
     activeNoteFill: "rgba(255, 238, 150, 0.96)",
     activeNoteStroke: "rgba(255, 251, 210, 1)",
+    preserveOrder: true,
     keySigSpec: scaleSig,
   });
 
@@ -4458,7 +4470,8 @@ function scheduleMelodyStaffHighlights(midis, offsetsSec, dursSec, t0CtxSec, tok
 
 function setMelodyNotationFromTimedNotes(notes, offsetsSec, beatSec) {
   const n = Math.min(notes.length, offsetsSec.length);
-  const cols = [new Set(), new Set(), new Set(), new Set()];
+  const cols = [[], [], [], []];
+  const seenByCol = [new Set(), new Set(), new Set(), new Set()];
   if (n <= 0) {
     liveNotationStaffMelodyFourCols = [[], [], [], []];
     return;
@@ -4478,9 +4491,13 @@ function setMelodyNotationFromTimedNotes(notes, offsetsSec, beatSec) {
     const b = beatSec > 0 ? offsetsSec[i] / beatSec : 0;
     const norm = Math.max(0, Math.min(0.9999, (Number.isFinite(b) ? b : 0) / span));
     const col = Math.max(0, Math.min(3, Math.floor(norm * 4)));
-    cols[col].add(clampPlaybackMidiToRange(m));
+    const midi = clampPlaybackMidiToRange(m);
+    if (!seenByCol[col].has(midi)) {
+      seenByCol[col].add(midi);
+      cols[col].push(midi);
+    }
   }
-  liveNotationStaffMelodyFourCols = cols.map((s) => [...s].sort((a, b) => a - b));
+  liveNotationStaffMelodyFourCols = cols;
 }
 
 function effectiveSoloRhythmId() {
