@@ -69,11 +69,15 @@ aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
     <div class="notation-panel-head">
       <h3 class="notation-panel-title">Pentagrama</h3>
       <p class="notation-panel-sub">
-        Clave de Sol: <strong>quatro compassos</strong> em colunas — o compasso actual e os três seguintes — com a união das notas previstas (tônica, harmonia, baixo, slots) por compasso; a partitura <strong>só muda no tempo 1</strong> de cada compasso em modo amostra (menos «saltitante» que batida a batida).
+        Clave de Sol: <strong>duas pautas opcionais</strong> em quatro colunas cada (este compasso + três à frente) — uma só para a <strong>harmonia do acorde</strong> e outra para <strong>tônica, baixo e slots</strong>. Pode ocultar a do acorde para ganhar altura no ecrã. A partitura <strong>só muda no tempo 1</strong> de cada compasso em modo amostra.
         A transposição escrita só mexe na partitura (som continua em concerto). O teto MIDI desce oitavas nos agudos antes de tocar.
         À direita, escalas candidatas em que o acorde da sequência (ou da harmonia base) se encaixa sobre a tônica global.
       </p>
       <div class="notation-panel-tools row row-global">
+        <label class="field field-check" title="Mostrar ou ocultar a segunda pauta (só as notas do padrão de harmonia do acorde). Útil em ecrãs pequenos.">
+          <input type="checkbox" id="notationShowChordStaff" checked />
+          <span>Mostrar pauta do acorde (harmonia)</span>
+        </label>
         <label class="field field-compact">
           <span>Partitura escrita</span>
           <select id="writtenTranspose" title="Som real = concerto. +2 Si♭: clarinete / trompete em Si♭. +3 Mi♭: sax alto.">
@@ -98,7 +102,16 @@ aria-label="Ativar ou desativar o áudio. Atalho: barra de espaço."
       </div>
     </div>
     <div class="notation-panel-body">
-      <div id="notationStaffHost" class="notation-staff-host" role="img" aria-live="off"></div>
+      <div class="notation-staves-wrap">
+        <div class="notation-chord-staff-wrap" id="notationChordStaffWrap" aria-label="Pauta da harmonia do acorde">
+          <div class="notation-staff-block-label">Harmonia (acorde)</div>
+          <div id="notationChordStaffHost" class="notation-staff-host" role="img" aria-live="off"></div>
+        </div>
+        <div class="notation-main-staff-wrap" aria-label="Pauta de tônica, baixo e slots">
+          <div class="notation-staff-block-label">Tônica · baixo · slots</div>
+          <div id="notationStaffHost" class="notation-staff-host" role="img" aria-live="off"></div>
+        </div>
+      </div>
       <aside class="notation-edu-scales" id="notationEduScales" aria-label="Escalas em que o acorde se insere">
         <h4 class="notation-edu-scales-title">Escalas na tônica</h4>
         <p class="notation-edu-scales-context" id="notationEduChordContext">—</p>

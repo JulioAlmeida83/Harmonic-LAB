@@ -1402,8 +1402,10 @@ let soloPatIndex = 0;
 let lastSoloChordSig = "";
 /** MIDI do acorde na faixa «ouvir harmonia» / pills (concerto). */
 let liveNotationHarmonyMidis = [];
-/** Pentagrama: 4 compassos (este + 3 à frente), união de notas previstas por compasso. */
+/** Pentagrama: 4 compassos — tônica, baixo, slots (sem harmonia do acorde). */
 let liveNotationStaffFourCols = [[], [], [], []];
+/** Mesma janela — só notas do padrão de harmonia (acorde por batida). */
+let liveNotationStaffChordFourCols = [[], [], [], []];
 /** Assinatura do último acorde desenhado na faixa «ouvir harmonia». */
 let lastHarmHearStripSig = "";
 /** Token / timer do loop da escala (cada «Tocar» incrementa o token). */
@@ -1536,16 +1538,23 @@ function parseMidiStaffSpelling(midi, preferFl) {
   return { letter, octave, acc, name };
 }
 
-/**
- * Pentagrama (clave de Sol): 4 compassos em colunas — este compasso e mais três
- * à frente. União das notas previstas (tônica, harmonia, baixo, slots) por
- * compasso; actualização só no tempo 1 de cada compasso em modo amostra.
- * Partitura = transposição escrita vs concerto.
- */
-function renderLiveNotationStaff() {
-  const host = document.getElementById("notationStaffHost");
-  if (!host) return;
+const NOTATION_SHOW_CHORD_STAFF_LS = "hl_notation_show_chord_staff";
 
+function syncNotationChordStaffWrapVisibility() {
+  const wrap = document.getElementById("notationChordStaffWrap");
+  const cb = document.getElementById("notationShowChordStaff");
+  if (!wrap) return;
+  const show = cb ? cb.checked : true;
+  wrap.hidden = !show;
+  wrap.setAttribute("aria-hidden", show ? "false" : "true");
+}
+
+/**
+ * Desenha uma pauta de 4 colunas num contentor. `opts.titleLine` e `opts.hintEmpty`
+ * contextualizam harmonia vs. tônica/baixo/slots.
+ */
+function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
+  if (!host) return;
   const pf = preferFlats();
   const tr = readWrittenTransposeSemitones();
   const NS = LIVE_NOTATION_NS;
@@ -1562,6 +1571,9 @@ function renderLiveNotationStaff() {
   const innerLo = staffLeft + 38;
   const innerHi = staffRight - 6;
   const colW = (innerHi - innerLo) / colCount;
+
+  const noteFill = opts.noteFill || "rgba(255, 210, 120, 0.42)";
+  const noteStroke = opts.noteStroke || "rgba(255, 228, 160, 0.95)";
 
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("viewBox", `0 0 ${svgW} ${svgH}`);
@@ -1602,10 +1614,7 @@ function renderLiveNotationStaff() {
   title.setAttribute("fill", "#9aa3b2");
   title.setAttribute("font-size", "10.5");
   title.setAttribute("font-weight", "600");
-  title.textContent =
-    tr === 0
-      ? "4 compassos (este + 3 à frente) · concerto (som real) · actualizado no 1 de cada compasso"
-      : `4 compassos (este + 3 à frente) · escrito ${tr > 0 ? "+" : ""}${tr} semitons vs concerto · actualizado no 1 de cada compasso`;
+  title.textContent = opts.titleLine(tr);
   gRoot.appendChild(title);
 
   const colLabels = ["Este", "+1", "+2", "+3"];
@@ -1634,10 +1643,6 @@ function renderLiveNotationStaff() {
     gRoot.appendChild(bl);
   }
 
-  const noteFill = "rgba(255, 210, 120, 0.42)";
-  const noteStroke = "rgba(255, 228, 160, 0.95)";
-
-  const cols = liveNotationStaffFourCols;
   const anyNotes = cols.some((c) => Array.isArray(c) && c.length);
   if (!anyNotes) {
     const hint = document.createElementNS(NS, "text");
@@ -1645,8 +1650,7 @@ function renderLiveNotationStaff() {
     hint.setAttribute("y", String(staffBottom0 - 42));
     hint.setAttribute("fill", "#9aa3b2");
     hint.setAttribute("font-size", "12");
-    hint.textContent =
-      "Ligue o áudio em modo amostra: ao iniciar cada compasso aparecem aqui as notas previstas para esse compasso e para os três seguintes (harmonia, baixo, slots, tônica).";
+    hint.textContent = opts.hintEmpty;
     gRoot.appendChild(hint);
     svg.appendChild(gRoot);
     host.appendChild(svg);
@@ -1748,6 +1752,39 @@ function renderLiveNotationStaff() {
 
   svg.appendChild(gRoot);
   host.appendChild(svg);
+}
+
+/**
+ * Pentagramas (clave de Sol): pauta opcional só da harmonia do acorde + pauta
+ * de tônica/baixo/slots; actualização no tempo 1 de cada compasso em modo amostra.
+ */
+function renderLiveNotationStaff() {
+  const hostRest = document.getElementById("notationStaffHost");
+  const hostChord = document.getElementById("notationChordStaffHost");
+
+  renderNotationFourColumnStaffIntoHost(hostRest, liveNotationStaffFourCols, {
+    titleLine: (tr) =>
+      tr === 0
+        ? "Tônica · baixo · slots — 4 compassos · concerto · actualizado no 1 de cada compasso"
+        : `Tônica · baixo · slots — 4 compassos · escrito ${tr > 0 ? "+" : ""}${tr} semitons · actualizado no 1 de cada compasso`,
+    hintEmpty:
+      "Ligue o áudio em modo amostra: ao iniciar cada compasso aparecem aqui tônica, linha de baixo e slots (sem o acorde da harmonia — ver pauta separada).",
+    noteFill: "rgba(255, 210, 120, 0.42)",
+    noteStroke: "rgba(255, 228, 160, 0.95)",
+  });
+
+  renderNotationFourColumnStaffIntoHost(hostChord, liveNotationStaffChordFourCols, {
+    titleLine: (tr) =>
+      tr === 0
+        ? "Harmonia (acorde) — 4 compassos · concerto · actualizado no 1 de cada compasso"
+        : `Harmonia (acorde) — 4 compassos · escrito ${tr > 0 ? "+" : ""}${tr} semitons · actualizado no 1 de cada compasso`,
+    hintEmpty:
+      "Sem harmonia nesta janela (base desligada, silenciada ou slots isolados). Active a harmonia ou mostre esta pauta só quando houver espaço no ecrã.",
+    noteFill: "rgba(140, 190, 255, 0.38)",
+    noteStroke: "rgba(190, 220, 255, 0.95)",
+  });
+
+  syncNotationChordStaffWrapVisibility();
 }
 
 /**
@@ -3817,26 +3854,15 @@ function progressionStepAtProgBeat(beatCounter) {
   return stepAtBar(progState.resolved, Math.floor(beatCounter / PROG_BEATS_PER_BAR));
 }
 
-/**
- * União de MIDIs (concerto) previstos para uma batida do loop de amostras,
- * usando os contadores de baixo/slots congelados em `anchorBeat` (início do
- * compasso actual na reconstrução).
- */
-function predictedExecMidisUnionForBeat(virtualBeat, anchorBeat, bassPatAtAnchor, slotsArpAtAnchor) {
+/** Só harmonia do acorde (padrão por batida), para pauta separada. */
+function predictedHarmonyChordMidisForBeat(virtualBeat) {
   const midis = new Set();
   const tcp = currentTonicPc();
-  const ivals = currentIvals();
   const baseOct = slotsPlaybackBaseOct();
   const slotStates = readSlotsState();
   const hasActiveSlots = slotStates.some((st) => st.on);
   const slotMixMode = document.getElementById("slotMixMode")?.value ?? "combined";
   const slotsIsolated = slotMixMode === "isolated" && hasActiveSlots;
-  const playStyle = document.getElementById("playStyle")?.value || "synth";
-  const rel = virtualBeat - anchorBeat;
-
-  if (!slotsIsolated && document.getElementById("droneOn")?.checked) {
-    midis.add(clampPlaybackMidiToRange(midiTonic(tcp, currentTonicOctave())));
-  }
 
   const muteHarmChords = harmonyChordSamplesMuted();
   const progStep = progressionStepAtProgBeat(virtualBeat);
@@ -3869,6 +3895,31 @@ function predictedExecMidisUnionForBeat(virtualBeat, anchorBeat, bassPatAtAnchor
       },
     });
   }
+  return midis;
+}
+
+/**
+ * Tônica (drone), baixo e slots — sem as notas do padrão de harmonia do acorde.
+ * `anchorBeat` + contadores alinham baixo e arpejo de slots à previsão por compasso.
+ */
+function predictedExecMidisRestForBeat(virtualBeat, anchorBeat, bassPatAtAnchor, slotsArpAtAnchor) {
+  const midis = new Set();
+  const tcp = currentTonicPc();
+  const ivals = currentIvals();
+  const baseOct = slotsPlaybackBaseOct();
+  const slotStates = readSlotsState();
+  const hasActiveSlots = slotStates.some((st) => st.on);
+  const slotMixMode = document.getElementById("slotMixMode")?.value ?? "combined";
+  const slotsIsolated = slotMixMode === "isolated" && hasActiveSlots;
+  const playStyle = document.getElementById("playStyle")?.value || "synth";
+  const rel = virtualBeat - anchorBeat;
+
+  if (!slotsIsolated && document.getElementById("droneOn")?.checked) {
+    midis.add(clampPlaybackMidiToRange(midiTonic(tcp, currentTonicOctave())));
+  }
+
+  const progStep = progressionStepAtProgBeat(virtualBeat);
+  const harmIdRaw = progStep ? "deg1" : document.getElementById("harmonyBase")?.value ?? "off";
 
   const bassMode = document.getElementById("harmonyBassMode")?.value ?? "off";
   const harmIdForBass = effectiveHarmonyIdForBassSamples(harmIdRaw);
@@ -3912,20 +3963,25 @@ function predictedExecMidisUnionForBeat(virtualBeat, anchorBeat, bassPatAtAnchor
   return midis;
 }
 
-/** Reconstrói as 4 colunas do pentagrama (este compasso + 3 à frente). */
+/** Reconstrói as 4 colunas do pentagrama (este compasso + 3 à frente), harmonia e resto separados. */
 function rebuildLiveNotationFourBarColumns(barStartBeat) {
   const bPat = sampleBassPatIndex;
   const sArp = sampleSlotsArpIndex;
-  const cols = [[], [], [], []];
+  const colsRest = [[], [], [], []];
+  const colsChord = [[], [], [], []];
   for (let col = 0; col < 4; col += 1) {
-    const set = new Set();
+    const setR = new Set();
+    const setC = new Set();
     for (let b = 0; b < PROG_BEATS_PER_BAR; b += 1) {
       const vt = barStartBeat + col * PROG_BEATS_PER_BAR + b;
-      for (const m of predictedExecMidisUnionForBeat(vt, barStartBeat, bPat, sArp)) set.add(m);
+      for (const m of predictedExecMidisRestForBeat(vt, barStartBeat, bPat, sArp)) setR.add(m);
+      for (const m of predictedHarmonyChordMidisForBeat(vt)) setC.add(m);
     }
-    cols[col] = [...set].sort((a, b) => a - b);
+    colsRest[col] = [...setR].sort((a, b) => a - b);
+    colsChord[col] = [...setC].sort((a, b) => a - b);
   }
-  liveNotationStaffFourCols = cols;
+  liveNotationStaffFourCols = colsRest;
+  liveNotationStaffChordFourCols = colsChord;
 }
 
 /** Reconstrói colunas a partir do início do compasso actual e redesenha. */
@@ -5043,6 +5099,31 @@ function wireGlobalControls() {
         renderLiveNotationStaff();
       }
     });
+  }
+
+  const notationShowChordEl = document.getElementById("notationShowChordStaff");
+  if (notationShowChordEl) {
+    try {
+      const v = localStorage.getItem(NOTATION_SHOW_CHORD_STAFF_LS);
+      if (v === "0" || v === "1") {
+        notationShowChordEl.checked = v === "1";
+      } else if (window.matchMedia && window.matchMedia("(max-width: 720px)").matches) {
+        notationShowChordEl.checked = false;
+      } else {
+        notationShowChordEl.checked = true;
+      }
+    } catch (_) {
+      notationShowChordEl.checked = true;
+    }
+    notationShowChordEl.addEventListener("change", () => {
+      try {
+        localStorage.setItem(NOTATION_SHOW_CHORD_STAFF_LS, notationShowChordEl.checked ? "1" : "0");
+      } catch (_) {
+        /* storage opcional */
+      }
+      syncNotationChordStaffWrapVisibility();
+    });
+    syncNotationChordStaffWrapVisibility();
   }
 
   // Rótulos de valor ao lado de sliders / inputs numéricos.
