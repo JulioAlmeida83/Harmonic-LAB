@@ -521,7 +521,7 @@ body.mode-simple .is-advanced {
 .notation-live-svg {
   display: block;
   width: 100%;
-  max-width: 520px;
+  max-width: min(100%, 960px);
   margin: 0 auto;
 }
 

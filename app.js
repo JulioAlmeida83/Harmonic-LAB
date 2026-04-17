@@ -1402,8 +1402,8 @@ let soloPatIndex = 0;
 let lastSoloChordSig = "";
 /** MIDI do acorde na faixa «ouvir harmonia» / pills (concerto). */
 let liveNotationHarmonyMidis = [];
-/** MIDI disparados na última batida do loop de samples (concerto) — única fonte do pentagrama. */
-let liveNotationExecMidis = [];
+/** Pentagrama: 4 compassos (este + 3 à frente), união de notas previstas por compasso. */
+let liveNotationStaffFourCols = [[], [], [], []];
 /** Assinatura do último acorde desenhado na faixa «ouvir harmonia». */
 let lastHarmHearStripSig = "";
 /** Token / timer do loop da escala (cada «Tocar» incrementa o token). */
@@ -1438,12 +1438,6 @@ function syncLiveNotationHarmonyMidis(midis) {
     : [];
 }
 
-function syncLiveNotationExecMidis(midis) {
-  liveNotationExecMidis = Array.isArray(midis)
-    ? [...new Set(midis)].sort((a, b) => a - b)
-    : [];
-  renderLiveNotationStaff();
-}
 
 function fillHarmonyHearStrip(host, midis, extraClasses) {
   if (!host) return;
@@ -1495,7 +1489,7 @@ function renderDashSoloPills(soloMidis) {
       host.appendChild(pill);
     }
   } else {
-    /* Pentagrama vem só do loop de samples (`liveNotationExecMidis`). */
+    /* Pentagrama: janela de 4 compassos em `liveNotationStaffFourCols`. */
   }
 }
 
@@ -1542,26 +1536,35 @@ function parseMidiStaffSpelling(midi, preferFl) {
   return { letter, octave, acc, name };
 }
 
-/** Pentagrama (clave de Sol): só notas realmente disparadas na última batida do loop de amostras; posição = partitura escrita (transp.). */
+/**
+ * Pentagrama (clave de Sol): 4 compassos em colunas — este compasso e mais três
+ * à frente. União das notas previstas (tônica, harmonia, baixo, slots) por
+ * compasso; actualização só no tempo 1 de cada compasso em modo amostra.
+ * Partitura = transposição escrita vs concerto.
+ */
 function renderLiveNotationStaff() {
   const host = document.getElementById("notationStaffHost");
   if (!host) return;
 
   const pf = preferFlats();
-  const concertMidis = liveNotationExecMidis;
   const tr = readWrittenTransposeSemitones();
   const NS = LIVE_NOTATION_NS;
   host.textContent = "";
 
   const lineGap = 14;
-  const staffLeft = 52;
-  const staffRight = 454;
-  const staffBottom0 = 96;
-  const svgH = 168;
+  const svgW = 940;
+  const staffLeft = 48;
+  const staffRight = svgW - 12;
+  const staffBottom0 = 108;
+  const svgH = 188;
   const staffTop = staffBottom0 - 4 * lineGap;
+  const colCount = 4;
+  const innerLo = staffLeft + 38;
+  const innerHi = staffRight - 6;
+  const colW = (innerHi - innerLo) / colCount;
 
   const svg = document.createElementNS(NS, "svg");
-  svg.setAttribute("viewBox", `0 0 480 ${svgH}`);
+  svg.setAttribute("viewBox", `0 0 ${svgW} ${svgH}`);
   svg.setAttribute("class", "notation-live-svg");
   svg.setAttribute("aria-hidden", "true");
 
@@ -1581,7 +1584,7 @@ function renderLiveNotationStaff() {
 
   function trebleClef(g) {
     const clef = document.createElementNS(NS, "text");
-    clef.setAttribute("x", "10");
+    clef.setAttribute("x", "8");
     clef.setAttribute("y", String(staffBottom0 - 28));
     clef.setAttribute("font-size", "42");
     clef.setAttribute("class", "notation-clef-g");
@@ -1595,111 +1598,152 @@ function renderLiveNotationStaff() {
 
   const title = document.createElementNS(NS, "text");
   title.setAttribute("x", "6");
-  title.setAttribute("y", "18");
+  title.setAttribute("y", "16");
   title.setAttribute("fill", "#9aa3b2");
-  title.setAttribute("font-size", "11");
+  title.setAttribute("font-size", "10.5");
   title.setAttribute("font-weight", "600");
   title.textContent =
     tr === 0
-      ? "Esta batida · concerto (som real)"
-      : `Esta batida · escrito ${tr > 0 ? "+" : ""}${tr} semitons vs concerto`;
+      ? "4 compassos (este + 3 à frente) · concerto (som real) · actualizado no 1 de cada compasso"
+      : `4 compassos (este + 3 à frente) · escrito ${tr > 0 ? "+" : ""}${tr} semitons vs concerto · actualizado no 1 de cada compasso`;
   gRoot.appendChild(title);
+
+  const colLabels = ["Este", "+1", "+2", "+3"];
+  for (let j = 0; j < colCount; j += 1) {
+    const lab = document.createElementNS(NS, "text");
+    const cx = innerLo + colW * j + colW / 2;
+    lab.setAttribute("x", String(cx));
+    lab.setAttribute("y", String(staffBottom0 + 22));
+    lab.setAttribute("fill", "#7a8494");
+    lab.setAttribute("font-size", "9");
+    lab.setAttribute("text-anchor", "middle");
+    lab.setAttribute("font-weight", "600");
+    lab.textContent = colLabels[j];
+    gRoot.appendChild(lab);
+  }
+
+  for (let j = 1; j < colCount; j += 1) {
+    const bx = innerLo + colW * j;
+    const bl = document.createElementNS(NS, "line");
+    bl.setAttribute("x1", String(bx));
+    bl.setAttribute("x2", String(bx));
+    bl.setAttribute("y1", String(staffTop - 4));
+    bl.setAttribute("y2", String(staffBottom0 + 4));
+    bl.setAttribute("stroke", "rgba(255,255,255,0.28)");
+    bl.setAttribute("stroke-width", "1");
+    gRoot.appendChild(bl);
+  }
 
   const noteFill = "rgba(255, 210, 120, 0.42)";
   const noteStroke = "rgba(255, 228, 160, 0.95)";
 
-  const uniqConcert = [...new Set(concertMidis)].sort((a, b) => a - b);
-  if (!uniqConcert.length) {
+  const cols = liveNotationStaffFourCols;
+  const anyNotes = cols.some((c) => Array.isArray(c) && c.length);
+  if (!anyNotes) {
     const hint = document.createElementNS(NS, "text");
-    hint.setAttribute("x", String(staffLeft + 8));
-    hint.setAttribute("y", String(staffBottom0 - 38));
+    hint.setAttribute("x", String(innerLo + 6));
+    hint.setAttribute("y", String(staffBottom0 - 42));
     hint.setAttribute("fill", "#9aa3b2");
     hint.setAttribute("font-size", "12");
     hint.textContent =
-      "Ligue o áudio em modo amostra: o pentagrama mostra as notas tocadas em cada batida (harmonia, slots, baixo, solo).";
+      "Ligue o áudio em modo amostra: ao iniciar cada compasso aparecem aqui as notas previstas para esse compasso e para os três seguintes (harmonia, baixo, slots, tônica).";
     gRoot.appendChild(hint);
     svg.appendChild(gRoot);
     host.appendChild(svg);
     return;
   }
 
-  const spread = Math.min(28, Math.max(16, Math.floor((staffRight - staffLeft - 56) / Math.max(uniqConcert.length, 1))));
-  const blockW = (uniqConcert.length - 1) * spread;
-  const x0 = staffLeft + Math.max(52, (staffRight - staffLeft - blockW) / 2);
-
   const placed = [];
-  for (let i = 0; i < uniqConcert.length; i += 1) {
-    const cMidi = uniqConcert[i];
-    const wMidi = concertToWrittenMidi(cMidi);
-    const sp = parseMidiStaffSpelling(wMidi, pf);
-    const step = letterOctaveToStaffStepFromE4(sp.letter, sp.octave);
-    const y = staffBottom0 - step * (lineGap / 2);
-    let x = x0 + i * spread;
-    for (const p of placed) {
-      if (Math.abs(p.y - y) < 5 && Math.abs(p.x - x) < 12) x += 14;
+  function drawColumnNotes(colIdx, concertMidis) {
+    const uniqConcert = [...new Set(concertMidis)].sort((a, b) => a - b);
+    if (!uniqConcert.length) return;
+    const xLo = innerLo + colIdx * colW + 5;
+    const xHi = innerLo + (colIdx + 1) * colW - 5;
+    const spread = Math.min(
+      22,
+      Math.max(11, Math.floor((xHi - xLo - 10) / Math.max(uniqConcert.length, 1))),
+    );
+    const cx = (xLo + xHi) / 2;
+    const blockW = (uniqConcert.length - 1) * spread;
+    const x0 = cx - blockW / 2;
+
+    for (let i = 0; i < uniqConcert.length; i += 1) {
+      const cMidi = uniqConcert[i];
+      const wMidi = concertToWrittenMidi(cMidi);
+      const sp = parseMidiStaffSpelling(wMidi, pf);
+      const stStep = letterOctaveToStaffStepFromE4(sp.letter, sp.octave);
+      const y = staffBottom0 - stStep * (lineGap / 2);
+      let x = x0 + i * spread;
+      for (const p of placed) {
+        if (Math.abs(p.y - y) < 5 && Math.abs(p.x - x) < 12) x += 14;
+      }
+      placed.push({ x, y });
+
+      if (y > staffBottom0 + 1 || y < staffTop - 1) {
+        const lx = document.createElementNS(NS, "line");
+        lx.setAttribute("x1", String(x - 16));
+        lx.setAttribute("x2", String(x + 18));
+        lx.setAttribute("y1", String(y));
+        lx.setAttribute("y2", String(y));
+        lx.setAttribute("stroke", "rgba(255,255,255,0.34)");
+        lx.setAttribute("stroke-width", "1");
+        gRoot.appendChild(lx);
+      }
+
+      if (sp.acc) {
+        const ax = document.createElementNS(NS, "text");
+        ax.setAttribute("x", String(x - 18));
+        ax.setAttribute("y", String(y + 5));
+        ax.setAttribute("font-size", "16");
+        ax.setAttribute("fill", noteStroke);
+        ax.setAttribute("font-family", "Georgia, 'Times New Roman', serif");
+        ax.textContent = sp.acc;
+        gRoot.appendChild(ax);
+      }
+
+      const head = document.createElementNS(NS, "ellipse");
+      head.setAttribute("cx", String(x));
+      head.setAttribute("cy", String(y));
+      head.setAttribute("rx", "7");
+      head.setAttribute("ry", "5");
+      head.setAttribute("fill", noteFill);
+      head.setAttribute("stroke", noteStroke);
+      head.setAttribute("stroke-width", "1.2");
+      gRoot.appendChild(head);
+
+      const stemDown = stStep >= 3;
+      const stem = document.createElementNS(NS, "line");
+      if (stemDown) {
+        stem.setAttribute("x1", String(x + 4.5));
+        stem.setAttribute("x2", String(x + 4.5));
+        stem.setAttribute("y1", String(y + 2));
+        stem.setAttribute("y2", String(y + 28));
+      } else {
+        stem.setAttribute("x1", String(x - 4.5));
+        stem.setAttribute("x2", String(x - 4.5));
+        stem.setAttribute("y1", String(y - 2));
+        stem.setAttribute("y2", String(y - 28));
+      }
+      stem.setAttribute("stroke", noteStroke);
+      stem.setAttribute("stroke-width", "1.25");
+      stem.setAttribute("stroke-linecap", "round");
+      gRoot.appendChild(stem);
+
+      const cap = document.createElementNS(NS, "text");
+      cap.setAttribute("x", String(x));
+      cap.setAttribute("y", String(y + 38));
+      cap.setAttribute("fill", "#c5cad6");
+      cap.setAttribute("font-size", "8");
+      cap.setAttribute("text-anchor", "middle");
+      const wLab = midiNoteLabel(wMidi, pf, "full");
+      const cLab = tr !== 0 ? ` (${midiNoteLabel(cMidi, pf, "pitch")})` : "";
+      cap.textContent = `${wLab}${cLab}`;
+      gRoot.appendChild(cap);
     }
-    placed.push({ x, y });
+  }
 
-    if (y > staffBottom0 + 1 || y < staffTop - 1) {
-      const lx = document.createElementNS(NS, "line");
-      lx.setAttribute("x1", String(x - 18));
-      lx.setAttribute("x2", String(x + 20));
-      lx.setAttribute("y1", String(y));
-      lx.setAttribute("y2", String(y));
-      lx.setAttribute("stroke", "rgba(255,255,255,0.34)");
-      lx.setAttribute("stroke-width", "1");
-      gRoot.appendChild(lx);
-    }
-
-    if (sp.acc) {
-      const ax = document.createElementNS(NS, "text");
-      ax.setAttribute("x", String(x - 20));
-      ax.setAttribute("y", String(y + 5));
-      ax.setAttribute("font-size", "17");
-      ax.setAttribute("fill", noteStroke);
-      ax.setAttribute("font-family", "Georgia, 'Times New Roman', serif");
-      ax.textContent = sp.acc;
-      gRoot.appendChild(ax);
-    }
-
-    const head = document.createElementNS(NS, "ellipse");
-    head.setAttribute("cx", String(x));
-    head.setAttribute("cy", String(y));
-    head.setAttribute("rx", "7.5");
-    head.setAttribute("ry", "5.2");
-    head.setAttribute("fill", noteFill);
-    head.setAttribute("stroke", noteStroke);
-    head.setAttribute("stroke-width", "1.25");
-    gRoot.appendChild(head);
-
-    const stemDown = step >= 3;
-    const stem = document.createElementNS(NS, "line");
-    if (stemDown) {
-      stem.setAttribute("x1", String(x + 5));
-      stem.setAttribute("x2", String(x + 5));
-      stem.setAttribute("y1", String(y + 2));
-      stem.setAttribute("y2", String(y + 30));
-    } else {
-      stem.setAttribute("x1", String(x - 5));
-      stem.setAttribute("x2", String(x - 5));
-      stem.setAttribute("y1", String(y - 2));
-      stem.setAttribute("y2", String(y - 30));
-    }
-    stem.setAttribute("stroke", noteStroke);
-    stem.setAttribute("stroke-width", "1.35");
-    stem.setAttribute("stroke-linecap", "round");
-    gRoot.appendChild(stem);
-
-    const cap = document.createElementNS(NS, "text");
-    cap.setAttribute("x", String(x - 10));
-    cap.setAttribute("y", String(y + 42));
-    cap.setAttribute("fill", "#c5cad6");
-    cap.setAttribute("font-size", "9");
-    cap.setAttribute("text-anchor", "middle");
-    const wLab = midiNoteLabel(wMidi, pf, "full");
-    const cLab = tr !== 0 ? ` (${midiNoteLabel(cMidi, pf, "pitch")})` : "";
-    cap.textContent = `${wLab}${cLab}`;
-    gRoot.appendChild(cap);
+  for (let j = 0; j < colCount; j += 1) {
+    drawColumnNotes(j, cols[j] || []);
   }
 
   svg.appendChild(gRoot);
@@ -2002,7 +2046,7 @@ function stopSampleExecutionLoop() {
   lastSoloChordSig = "";
   lastHarmHearStripSig = "";
   clearHarmonyHearVisuals();
-  syncLiveNotationExecMidis([]);
+  rebuildNotationStaffFromCurrentBeatThenRender();
   const soloLnStop = document.getElementById("soloHearLine");
   if (soloLnStop) soloLnStop.textContent = "";
   clearDashSoloPills();
@@ -2644,6 +2688,9 @@ function refreshSampleExecutionLoop() {
     // Export em modo render: verifica se já atingimos N ciclos e pára a
     // gravação. Não trava o step — o áudio continua a correr normalmente.
     exportCheckRenderStop();
+    if (sampleHarmonyBeatIndex % PROG_BEATS_PER_BAR === 0) {
+      rebuildNotationStaffFromCurrentBeatThenRender();
+    }
     const tcp = currentTonicPc();
     const ivals = currentIvals();
     const baseOct = slotsPlaybackBaseOct();
@@ -2947,7 +2994,6 @@ function refreshSampleExecutionLoop() {
       clearDashSoloPills();
     }
 
-    syncLiveNotationExecMidis(execThisBeat);
     sampleHarmonyBeatIndex += 1;
   };
 
@@ -3765,6 +3811,131 @@ function soloIsFirstBeatOfQuantizeWindow(ctxSolo) {
   return sampleHarmonyBeatIndex % PROG_BEATS_PER_BAR === 0;
 }
 
+/** Progressão resolvida no compasso onde cai `beatCounter` (4/4). */
+function progressionStepAtProgBeat(beatCounter) {
+  if (!progState.enabled || !progState.resolved.length) return null;
+  return stepAtBar(progState.resolved, Math.floor(beatCounter / PROG_BEATS_PER_BAR));
+}
+
+/**
+ * União de MIDIs (concerto) previstos para uma batida do loop de amostras,
+ * usando os contadores de baixo/slots congelados em `anchorBeat` (início do
+ * compasso actual na reconstrução).
+ */
+function predictedExecMidisUnionForBeat(virtualBeat, anchorBeat, bassPatAtAnchor, slotsArpAtAnchor) {
+  const midis = new Set();
+  const tcp = currentTonicPc();
+  const ivals = currentIvals();
+  const baseOct = slotsPlaybackBaseOct();
+  const slotStates = readSlotsState();
+  const hasActiveSlots = slotStates.some((st) => st.on);
+  const slotMixMode = document.getElementById("slotMixMode")?.value ?? "combined";
+  const slotsIsolated = slotMixMode === "isolated" && hasActiveSlots;
+  const playStyle = document.getElementById("playStyle")?.value || "synth";
+  const rel = virtualBeat - anchorBeat;
+
+  if (!slotsIsolated && document.getElementById("droneOn")?.checked) {
+    midis.add(clampPlaybackMidiToRange(midiTonic(tcp, currentTonicOctave())));
+  }
+
+  const muteHarmChords = harmonyChordSamplesMuted();
+  const progStep = progressionStepAtProgBeat(virtualBeat);
+  const harmIdRaw = progStep ? "deg1" : document.getElementById("harmonyBase")?.value ?? "off";
+
+  if (!slotsIsolated && harmIdRaw !== "off" && !muteHarmChords) {
+    const harmMidisRaw = progStep
+      ? chordMidisAbsolute(progStep.step.chord, baseOct)
+      : harmonyMidis(tcp, effectiveStaticHarmonyIvals(), harmIdRaw, baseOct);
+    const normH = globalThis.HLChordNormalizer
+      ? HLChordNormalizer.normalizeChord(harmMidisRaw, currentBankId())
+      : { midis: harmMidisRaw, gainScale: 1, styleOverride: undefined };
+    const harmMidis = normH.midis;
+    const harmonyStyleRaw = (() => {
+      if (progState.enabled && progState.resolved.length) {
+        const p = document.getElementById("progHarmonyStyle")?.value;
+        if (p) return p;
+      }
+      return document.getElementById("harmonyStyle")?.value || "sustain";
+    })();
+    const harmonyStyle = resolveStyleOverride(harmonyStyleRaw, normH);
+    executeHarmonyPattern({
+      styleKey: harmonyStyle,
+      chord: harmMidis,
+      beat: 0.5,
+      absBeat: virtualBeat,
+      peak: 0.1,
+      schedule: ({ midi }) => {
+        if (typeof midi === "number") midis.add(clampPlaybackMidiToRange(midi));
+      },
+    });
+  }
+
+  const bassMode = document.getElementById("harmonyBassMode")?.value ?? "off";
+  const harmIdForBass = effectiveHarmonyIdForBassSamples(harmIdRaw);
+  if (!slotsIsolated && harmIdForBass !== "off" && bassMode !== "off") {
+    const bassTonicPc = progStep ? progStep.step.chord.rootPc : tcp;
+    const bassIvals = progStep ? progSyntheticIvalsForChord(progStep.step.chord) : effectiveStaticHarmonyIvals();
+    const bassHarmId = progStep ? "deg1" : harmIdForBass;
+    const bassOff = readHarmonyBassSemitoneOffset();
+    const bassStep = bassPatAtAnchor + rel;
+    const bMidiRaw = nextHarmonyBassMidi(bassTonicPc, bassIvals, bassHarmId, baseOct, bassMode, bassStep, bassOff);
+    if (bMidiRaw != null) {
+      const normB = globalThis.HLChordNormalizer
+        ? HLChordNormalizer.normalizeSingleNote(bMidiRaw, currentBassBankId())
+        : { midi: bMidiRaw, gainScale: 1, styleOverride: undefined };
+      midis.add(clampPlaybackMidiToRange(normB.midi));
+    }
+  }
+
+  const activeSlots = slotStates.filter((st) => st.on);
+  if (playStyle === "arpeggio") {
+    if (activeSlots.length) {
+      const idx = (slotsArpAtAnchor + rel) % activeSlots.length;
+      const st = activeSlots[idx];
+      const notes = chordMidisFromSlotState(st, tcp, ivals, baseOct);
+      notes.forEach((midi) => midis.add(clampPlaybackMidiToRange(midi)));
+    }
+  } else if (playStyle === "arpeggio_full") {
+    if (activeSlots.length) {
+      const idx = (slotsArpAtAnchor + rel) % activeSlots.length;
+      const st = activeSlots[idx];
+      const notes = chordMidisFromSlotState(st, tcp, ivals, baseOct);
+      notes.forEach((midi) => midis.add(clampPlaybackMidiToRange(midi)));
+    }
+  } else {
+    activeSlots.forEach((st) => {
+      const notes = chordMidisFromSlotState(st, tcp, ivals, baseOct);
+      notes.forEach((midi) => midis.add(clampPlaybackMidiToRange(midi)));
+    });
+  }
+
+  return midis;
+}
+
+/** Reconstrói as 4 colunas do pentagrama (este compasso + 3 à frente). */
+function rebuildLiveNotationFourBarColumns(barStartBeat) {
+  const bPat = sampleBassPatIndex;
+  const sArp = sampleSlotsArpIndex;
+  const cols = [[], [], [], []];
+  for (let col = 0; col < 4; col += 1) {
+    const set = new Set();
+    for (let b = 0; b < PROG_BEATS_PER_BAR; b += 1) {
+      const vt = barStartBeat + col * PROG_BEATS_PER_BAR + b;
+      for (const m of predictedExecMidisUnionForBeat(vt, barStartBeat, bPat, sArp)) set.add(m);
+    }
+    cols[col] = [...set].sort((a, b) => a - b);
+  }
+  liveNotationStaffFourCols = cols;
+}
+
+/** Reconstrói colunas a partir do início do compasso actual e redesenha. */
+function rebuildNotationStaffFromCurrentBeatThenRender() {
+  const hb = sampleHarmonyBeatIndex;
+  const bar0 = hb - (hb % PROG_BEATS_PER_BAR);
+  rebuildLiveNotationFourBarColumns(bar0);
+  renderLiveNotationStaff();
+}
+
 /**
  * Junta o ritmo de solo de `windowBeats` batidas e, se o modelo ultrapassar o
  * fim da janela, escala proporcionalmente para caber em `windowBeats * beatSec`.
@@ -4383,9 +4554,7 @@ function progResetPlayhead() {
  * contrário `null`. Usado pelo loop para sobrepor a harmonia base.
  */
 function getActiveProgressionStep() {
-  if (!progState.enabled || !progState.resolved.length) return null;
-  const barIdx = Math.floor(progState.beatCounter / PROG_BEATS_PER_BAR);
-  return stepAtBar(progState.resolved, barIdx);
+  return progressionStepAtProgBeat(progState.beatCounter);
 }
 
 /**
@@ -4682,7 +4851,7 @@ function wireGlobalControls() {
     progResolveFromUI();
     progRefreshCifras();
     progRenderStatus();
-    renderLiveNotationStaff();
+    rebuildNotationStaffFromCurrentBeatThenRender();
     scheduleSyncAudio();
     refreshSampleExecutionLoop();
   };
@@ -5119,7 +5288,7 @@ wireProgressionControls();
 progResolveFromUI();
 progRefreshCifras();
 progRenderStatus();
-renderLiveNotationStaff();
+rebuildNotationStaffFromCurrentBeatThenRender();
 updateSampleControlsEnabled();
 updateSlotsMissingNotes();
 
