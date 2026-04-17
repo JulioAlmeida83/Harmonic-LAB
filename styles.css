@@ -1503,6 +1503,16 @@ input[type="checkbox"]:focus-visible {
     padding: 1rem 1rem 0.5rem;
   }
 
+  /* Sticky + z-index faz o painel «Ao vivo» parecer uma janela flutuante
+     por cima do resto ao rolar no #app-shell (comum em mobile). Em ecrã
+     estreito mantém-se no fluxo normal. */
+  .playhead-dash {
+    position: relative;
+    top: auto;
+    z-index: auto;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.22);
+  }
+
   .panel {
     margin: 0.75rem 0.75rem;
     padding: 0.85rem 0.75rem 0.95rem;
