@@ -777,14 +777,24 @@ class AudioEngine {
     this._harmStabPrimed = false;
     this._harmStabKey = "";
     this.fxState = {
-      reverb: false,
-      fader: false,
-      delay: false,
-      echo: false,
-      chorus: false,
+      reverb: 0,
+      fader: 0,
+      delay: 0,
+      echo: 0,
+      chorus: 0,
+      lfoRate: 0.9,
+      lfoDepth: 0.35,
+      tremolo: 0,
+      tremoloRate: 3.2,
+      tremoloDepth: 0.4,
+      autoPan: 0,
+      autoPanRate: 1.2,
+      autoPanDepth: 0.5,
     };
     this.fxNodes = null;
     this._chorusLfo = null;
+    this._tremoloLfo = null;
+    this._autoPanLfo = null;
   }
 
   ensure() {
@@ -848,6 +858,33 @@ class AudioEngine {
     chorusLfo.start();
     this._chorusLfo = chorusLfo;
 
+    const tremoloGain = this.ctx.createGain();
+    tremoloGain.gain.value = 1;
+    const tremoloDepth = this.ctx.createGain();
+    tremoloDepth.gain.value = 0;
+    const tremoloLfo = this.ctx.createOscillator();
+    tremoloLfo.type = "sine";
+    tremoloLfo.frequency.value = 3.2;
+    tremoloLfo.connect(tremoloDepth);
+    tremoloDepth.connect(tremoloGain.gain);
+    tremoloLfo.start();
+    this._tremoloLfo = tremoloLfo;
+
+    const hasStereoPanner = typeof this.ctx.createStereoPanner === "function";
+    const autoPanNode = hasStereoPanner ? this.ctx.createStereoPanner() : this.ctx.createGain();
+    if (hasStereoPanner) autoPanNode.pan.value = 0;
+    const autoPanDepth = this.ctx.createGain();
+    autoPanDepth.gain.value = 0;
+    const autoPanLfo = this.ctx.createOscillator();
+    autoPanLfo.type = "sine";
+    autoPanLfo.frequency.value = 1.2;
+    if (hasStereoPanner) {
+      autoPanLfo.connect(autoPanDepth);
+      autoPanDepth.connect(autoPanNode.pan);
+    }
+    autoPanLfo.start();
+    this._autoPanLfo = autoPanLfo;
+
     // master → limiter → (dry + wet via convolver) → destination
     this.masterMix.connect(this.masterLimiter);
     this.masterLimiter.connect(dry);
@@ -872,13 +909,15 @@ class AudioEngine {
     chorusDelay.connect(chorusWet);
     chorusWet.connect(fxOut);
 
-    fxOut.connect(this.ctx.destination);
+    fxOut.connect(tremoloGain);
+    tremoloGain.connect(autoPanNode);
+    autoPanNode.connect(this.ctx.destination);
 
     // Tap de gravação: MediaStreamDestination recebe o mesmo sinal pós-reverb
     // que vai ao destino. Sem efeito audível — MediaStreamDestination só emite
     // quando um MediaRecorder/consumer subscreve o stream.
     this.recDest = this.ctx.createMediaStreamDestination();
-    fxOut.connect(this.recDest);
+    autoPanNode.connect(this.recDest);
 
     this.fxNodes = {
       dry,
@@ -886,7 +925,13 @@ class AudioEngine {
       delayWet,
       echoWet,
       chorusWet,
+      chorusDepth,
       fxOut,
+      tremoloGain,
+      tremoloDepth,
+      autoPanNode,
+      autoPanDepth,
+      hasStereoPanner,
     };
     this.applyFxState();
 
@@ -980,17 +1025,68 @@ class AudioEngine {
 
   setFxEnabled(name, enabled) {
     if (!this.fxState || !(name in this.fxState)) return;
-    this.fxState[name] = Boolean(enabled);
+    this.fxState[name] = enabled ? 1 : 0;
+    this.applyFxState();
+  }
+
+  setFxAmount(name, amount01) {
+    if (!this.fxState || !(name in this.fxState)) return;
+    const a = Number.isFinite(Number(amount01)) ? Number(amount01) : 0;
+    this.fxState[name] = Math.max(0, Math.min(1, a));
+    this.applyFxState();
+  }
+
+  setFxModulation(rateHz, depth01) {
+    const r = Number.isFinite(Number(rateHz)) ? Number(rateHz) : 0.9;
+    const d = Number.isFinite(Number(depth01)) ? Number(depth01) : 0.35;
+    this.fxState.lfoRate = Math.max(0.1, Math.min(8, r));
+    this.fxState.lfoDepth = Math.max(0, Math.min(1, d));
     this.applyFxState();
   }
 
   applyFxState() {
     if (!this.fxNodes) return;
-    this.fxNodes.reverbWet.gain.setTargetAtTime(this.fxState.reverb ? 0.15 : 0.0, this.ctx.currentTime, 0.02);
-    this.fxNodes.delayWet.gain.setTargetAtTime(this.fxState.delay ? 0.17 : 0.0, this.ctx.currentTime, 0.02);
-    this.fxNodes.echoWet.gain.setTargetAtTime(this.fxState.echo ? 0.16 : 0.0, this.ctx.currentTime, 0.02);
-    this.fxNodes.chorusWet.gain.setTargetAtTime(this.fxState.chorus ? 0.14 : 0.0, this.ctx.currentTime, 0.02);
-    this.fxNodes.fxOut.gain.setTargetAtTime(this.fxState.fader ? 0.72 : 1.0, this.ctx.currentTime, 0.03);
+    const rv = Math.max(0, Math.min(1, Number(this.fxState.reverb) || 0));
+    const dl = Math.max(0, Math.min(1, Number(this.fxState.delay) || 0));
+    const ec = Math.max(0, Math.min(1, Number(this.fxState.echo) || 0));
+    const ch = Math.max(0, Math.min(1, Number(this.fxState.chorus) || 0));
+    const fd = Math.max(0, Math.min(1, Number(this.fxState.fader) || 0));
+    const rate = Math.max(0.1, Math.min(8, Number(this.fxState.lfoRate) || 0.9));
+    const depth = Math.max(0, Math.min(1, Number(this.fxState.lfoDepth) || 0));
+    const tremAmt = Math.max(0, Math.min(1, Number(this.fxState.tremolo) || 0));
+    const tremRate = Math.max(0.1, Math.min(12, Number(this.fxState.tremoloRate) || 3.2));
+    const tremDepth = Math.max(0, Math.min(1, Number(this.fxState.tremoloDepth) || 0));
+    const panAmt = Math.max(0, Math.min(1, Number(this.fxState.autoPan) || 0));
+    const panRate = Math.max(0.1, Math.min(8, Number(this.fxState.autoPanRate) || 1.2));
+    const panDepth = Math.max(0, Math.min(1, Number(this.fxState.autoPanDepth) || 0));
+
+    this.fxNodes.reverbWet.gain.setTargetAtTime(0.22 * rv, this.ctx.currentTime, 0.02);
+    this.fxNodes.delayWet.gain.setTargetAtTime(0.24 * dl, this.ctx.currentTime, 0.02);
+    this.fxNodes.echoWet.gain.setTargetAtTime(0.22 * ec, this.ctx.currentTime, 0.02);
+    this.fxNodes.chorusWet.gain.setTargetAtTime(0.2 * ch, this.ctx.currentTime, 0.02);
+    this.fxNodes.fxOut.gain.setTargetAtTime(1 - 0.42 * fd, this.ctx.currentTime, 0.03);
+    const tremDepthScaled = tremAmt * tremDepth;
+    const tremBase = Math.max(0.15, 1 - tremDepthScaled * 0.7);
+    this.fxNodes.tremoloGain.gain.setTargetAtTime(tremBase, this.ctx.currentTime, 0.03);
+    if (this.fxNodes.tremoloDepth?.gain) {
+      this.fxNodes.tremoloDepth.gain.setTargetAtTime(0.45 * tremDepthScaled, this.ctx.currentTime, 0.03);
+    }
+    if (this._tremoloLfo?.frequency) {
+      this._tremoloLfo.frequency.setTargetAtTime(tremRate, this.ctx.currentTime, 0.05);
+    }
+    if (this.fxNodes.autoPanDepth?.gain) {
+      const panDepthScaled = this.fxNodes.hasStereoPanner ? panAmt * panDepth : 0;
+      this.fxNodes.autoPanDepth.gain.setTargetAtTime(panDepthScaled, this.ctx.currentTime, 0.04);
+    }
+    if (this._autoPanLfo?.frequency) {
+      this._autoPanLfo.frequency.setTargetAtTime(panRate, this.ctx.currentTime, 0.05);
+    }
+    if (this._chorusLfo?.frequency) {
+      this._chorusLfo.frequency.setTargetAtTime(rate, this.ctx.currentTime, 0.05);
+    }
+    if (this.fxNodes.chorusDepth?.gain) {
+      this.fxNodes.chorusDepth.gain.setTargetAtTime(0.0005 + 0.012 * depth, this.ctx.currentTime, 0.05);
+    }
   }
 
   /**
@@ -1489,6 +1585,8 @@ let liveNotationStaffFourCols = [[], [], [], []];
 let liveNotationStaffChordFourCols = [[], [], [], []];
 /** Pauta principal: escala + solo (sempre visível). */
 let liveNotationStaffMelodyFourCols = [[], [], [], []];
+/** Notas melódicas actualmente soando (concerto), para highlight na pauta. */
+let liveNotationActiveMelodyMidis = new Set();
 /** Assinatura do último acorde desenhado na faixa «ouvir harmonia». */
 let lastHarmHearStripSig = "";
 /** Token / timer do loop da escala (cada «Tocar» incrementa o token). */
@@ -1497,6 +1595,8 @@ let scaleLoopTimer = null;
 
 /** Timers de highlight visual da escala — limpos no stop para evitar ficar "aceso". */
 const scaleHighlightTimers = [];
+/** Timers de highlight do pentagrama melódico (nota ativa). */
+const melodyStaffHighlightTimers = [];
 /** Highlights da faixa de notas da sequência (sincronizados com o áudio). */
 const seqStripHighlightTimers = [];
 /** Highlights da faixa de notas da harmonia (por batida do loop de amostras). */
@@ -1669,7 +1769,8 @@ const MAJOR_KEY_SIG_COUNT_BY_PC = {
 
 /** Assinatura em nº de acidentes da escala global (aprox. por modo relativo maior). */
 function currentScaleKeySignatureCount() {
-  const tonicPc = currentTonicPc();
+  const tr = readWrittenTransposeSemitones();
+  const tonicPc = ((currentTonicPc() + tr) % 12 + 12) % 12;
   const scaleKey = document.getElementById("scaleType")?.value || "major";
   const relMajorShift = {
     major: 0,
@@ -1693,6 +1794,7 @@ function currentScaleKeySignatureCount() {
 
 /** Assinatura para acorde ativo: heurística maior/menor pela 3ª do acorde. */
 function currentChordKeySignatureCount() {
+  const tr = readWrittenTransposeSemitones();
   const at = getActiveProgressionStep();
   let chord = at?.step?.chord || null;
   if (!chord) {
@@ -1708,7 +1810,8 @@ function currentChordKeySignatureCount() {
   }
   if (!chord || chord.rootPc == null) return currentScaleKeySignatureCount();
   const isMinor = (chord.intervals?.[1] ?? 4) === 3;
-  const relMajorPc = isMinor ? ((chord.rootPc + 3) % 12 + 12) % 12 : chord.rootPc;
+  const writtenRootPc = ((chord.rootPc + tr) % 12 + 12) % 12;
+  const relMajorPc = isMinor ? ((writtenRootPc + 3) % 12 + 12) % 12 : writtenRootPc;
   return MAJOR_KEY_SIG_COUNT_BY_PC[relMajorPc] ?? 0;
 }
 
@@ -1988,9 +2091,10 @@ function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
       head.setAttribute("cy", String(y));
       head.setAttribute("rx", "7");
       head.setAttribute("ry", "5");
-      head.setAttribute("fill", noteFill);
-      head.setAttribute("stroke", noteStroke);
-      head.setAttribute("stroke-width", "1.2");
+      const isActive = !!opts.activeConcertMidis?.has(cMidi);
+      head.setAttribute("fill", isActive ? opts.activeNoteFill || "#fff0a8" : noteFill);
+      head.setAttribute("stroke", isActive ? opts.activeNoteStroke || "#fffbe0" : noteStroke);
+      head.setAttribute("stroke-width", isActive ? "2" : "1.2");
       gRoot.appendChild(head);
 
       const stemDown = stStep >= 3;
@@ -2046,20 +2150,23 @@ function renderLiveNotationStaff() {
   renderNotationFourColumnStaffIntoHost(hostMelody, liveNotationStaffMelodyFourCols, {
     titleLine: (tr) =>
       tr === 0
-        ? "Principal · escala + solo — 4 compassos · concerto · actualizado no 1 de cada compasso"
-        : `Principal · escala + solo — 4 compassos · escrito ${tr > 0 ? "+" : ""}${tr} semitons · actualizado no 1 de cada compasso`,
+        ? `Principal · escala + solo — 4 compassos · ${notationConcertWrittenKeyLabel(tr)} · actualizado no 1 de cada compasso`
+        : `Principal · escala + solo — 4 compassos · ${notationConcertWrittenKeyLabel(tr)} · escrito ${tr > 0 ? "+" : ""}${tr} semitons · actualizado no 1 de cada compasso`,
     hintEmpty:
       "Use ▶ Tocar escala ou ▶ Tocar solo: esta pauta mostra as frases melódicas (escala e improvisação) e permanece sempre visível.",
     noteFill: "rgba(190, 235, 170, 0.35)",
     noteStroke: "rgba(225, 255, 205, 0.95)",
+    activeConcertMidis: liveNotationActiveMelodyMidis,
+    activeNoteFill: "rgba(255, 238, 150, 0.96)",
+    activeNoteStroke: "rgba(255, 251, 210, 1)",
     keySigSpec: scaleSig,
   });
 
   renderNotationFourColumnStaffIntoHost(hostRest, liveNotationStaffFourCols, {
     titleLine: (tr) =>
       tr === 0
-        ? "Tônica · baixo · slots — 4 compassos · concerto · actualizado no 1 de cada compasso"
-        : `Tônica · baixo · slots — 4 compassos · escrito ${tr > 0 ? "+" : ""}${tr} semitons · actualizado no 1 de cada compasso`,
+        ? `Tônica · baixo · slots — 4 compassos · ${notationConcertWrittenKeyLabel(tr)} · actualizado no 1 de cada compasso`
+        : `Tônica · baixo · slots — 4 compassos · ${notationConcertWrittenKeyLabel(tr)} · escrito ${tr > 0 ? "+" : ""}${tr} semitons · actualizado no 1 de cada compasso`,
     hintEmpty:
       "Ligue o áudio em modo amostra: ao iniciar cada compasso aparecem aqui tônica, linha de baixo e slots (sem o acorde da harmonia — ver pauta separada).",
     noteFill: "rgba(255, 210, 120, 0.42)",
@@ -2070,8 +2177,8 @@ function renderLiveNotationStaff() {
   renderNotationFourColumnStaffIntoHost(hostChord, liveNotationStaffChordFourCols, {
     titleLine: (tr) =>
       tr === 0
-        ? "Harmonia (acorde) — 4 compassos · concerto · actualizado no 1 de cada compasso"
-        : `Harmonia (acorde) — 4 compassos · escrito ${tr > 0 ? "+" : ""}${tr} semitons · actualizado no 1 de cada compasso`,
+        ? `Harmonia (acorde) — 4 compassos · ${notationConcertWrittenKeyLabel(tr)} · actualizado no 1 de cada compasso`
+        : `Harmonia (acorde) — 4 compassos · ${notationConcertWrittenKeyLabel(tr)} · escrito ${tr > 0 ? "+" : ""}${tr} semitons · actualizado no 1 de cada compasso`,
     hintEmpty:
       "Sem harmonia nesta janela (base desligada, silenciada ou slots isolados). Active a harmonia ou mostre esta pauta só quando houver espaço no ecrã.",
     noteFill: "rgba(140, 190, 255, 0.38)",
@@ -2121,6 +2228,12 @@ function clearScaleSeqStripUi() {
 function clearScaleHighlights() {
   for (const t of scaleHighlightTimers) clearTimeout(t);
   scaleHighlightTimers.length = 0;
+  for (const t of melodyStaffHighlightTimers) clearTimeout(t);
+  melodyStaffHighlightTimers.length = 0;
+  if (liveNotationActiveMelodyMidis.size) {
+    liveNotationActiveMelodyMidis = new Set();
+    renderLiveNotationStaff();
+  }
   clearScaleSeqStripUi();
   const strip = document.getElementById("degreeStrip");
   if (strip) strip.querySelectorAll(".degree-col.is-playing").forEach((el) => el.classList.remove("is-playing"));
@@ -2379,6 +2492,9 @@ function stopSampleExecutionLoop() {
   lastSoloChordSig = "";
   lastHarmHearStripSig = "";
   clearHarmonyHearVisuals();
+  for (const t of melodyStaffHighlightTimers) clearTimeout(t);
+  melodyStaffHighlightTimers.length = 0;
+  liveNotationActiveMelodyMidis = new Set();
   rebuildNotationStaffFromCurrentBeatThenRender();
   const soloLnStop = document.getElementById("soloHearLine");
   if (soloLnStop) soloLnStop.textContent = "";
@@ -3314,6 +3430,13 @@ function refreshSampleExecutionLoop() {
             }
             setMelodyNotationFromTimedNotes(soloMidisPlayed, attacks.map((a) => a.off), beat);
             renderLiveNotationStaff();
+            scheduleMelodyStaffHighlights(
+              soloMidisPlayed,
+              attacks.map((a) => a.off),
+              attacks.map((a) => a.dur),
+              t,
+              () => audioUserEnabled,
+            );
             renderDashSoloPills(soloMidisPlayed);
           } else if (soloHear) {
             soloHear.textContent = "";
@@ -3605,6 +3728,16 @@ function currentIvals() {
 
 function currentTonicPc() {
   return parseTonic(document.getElementById("tonic").value);
+}
+
+function notationConcertWrittenKeyLabel(tr) {
+  const pf = preferFlats();
+  const concertPc = ((currentTonicPc() % 12) + 12) % 12;
+  const writtenPc = ((concertPc + tr) % 12 + 12) % 12;
+  const concert = pcToName(concertPc, pf);
+  const written = pcToName(writtenPc, pf);
+  if (!tr) return `tom de concerto: ${concert}`;
+  return `tom de concerto: ${concert} · tom escrito: ${written}`;
 }
 
 function preferFlats() {
@@ -4289,16 +4422,62 @@ function rebuildLiveNotationFourBarColumns(barStartBeat) {
 
 function clearMelodyNotationCols() {
   liveNotationStaffMelodyFourCols = [[], [], [], []];
+  for (const t of melodyStaffHighlightTimers) clearTimeout(t);
+  melodyStaffHighlightTimers.length = 0;
+  liveNotationActiveMelodyMidis = new Set();
+}
+
+function scheduleMelodyStaffHighlights(midis, offsetsSec, dursSec, t0CtxSec, tokenGuard) {
+  for (const t of melodyStaffHighlightTimers) clearTimeout(t);
+  melodyStaffHighlightTimers.length = 0;
+  liveNotationActiveMelodyMidis = new Set();
+  renderLiveNotationStaff();
+  const ctxNow = audio?.ctx?.currentTime ?? 0;
+  const n = Math.min(midis.length, offsetsSec.length, dursSec.length);
+  for (let i = 0; i < n; i += 1) {
+    const midi = Number(midis[i]);
+    if (!Number.isFinite(midi)) continue;
+    const startMs = Math.max(0, Math.round((t0CtxSec + offsetsSec[i] - ctxNow) * 1000));
+    const endMs = Math.max(startMs + 20, Math.round((t0CtxSec + offsetsSec[i] + dursSec[i] - ctxNow) * 1000));
+    melodyStaffHighlightTimers.push(
+      setTimeout(() => {
+        if (typeof tokenGuard === "function" && !tokenGuard()) return;
+        liveNotationActiveMelodyMidis.add(midi);
+        renderLiveNotationStaff();
+      }, startMs),
+    );
+    melodyStaffHighlightTimers.push(
+      setTimeout(() => {
+        if (typeof tokenGuard === "function" && !tokenGuard()) return;
+        liveNotationActiveMelodyMidis.delete(midi);
+        renderLiveNotationStaff();
+      }, endMs),
+    );
+  }
 }
 
 function setMelodyNotationFromTimedNotes(notes, offsetsSec, beatSec) {
-  const cols = [new Set(), new Set(), new Set(), new Set()];
   const n = Math.min(notes.length, offsetsSec.length);
+  const cols = [new Set(), new Set(), new Set(), new Set()];
+  if (n <= 0) {
+    liveNotationStaffMelodyFourCols = [[], [], [], []];
+    return;
+  }
+  let maxBeatPos = 0;
+  for (let i = 0; i < n; i += 1) {
+    const b = beatSec > 0 ? offsetsSec[i] / beatSec : 0;
+    if (Number.isFinite(b) && b > maxBeatPos) maxBeatPos = b;
+  }
+  // Distribui a frase inteira nas 4 colunas da janela visível.
+  // Em vez de concentrar no compasso 1, usa a posição relativa no
+  // percurso completo da frase para manter layout estável.
+  const span = Math.max(0.001, maxBeatPos + 0.5);
   for (let i = 0; i < n; i += 1) {
     const m = notes[i];
     if (typeof m !== "number") continue;
-    const beatPos = beatSec > 0 ? offsetsSec[i] / beatSec : 0;
-    const col = Math.max(0, Math.min(3, Math.floor(beatPos / PROG_BEATS_PER_BAR)));
+    const b = beatSec > 0 ? offsetsSec[i] / beatSec : 0;
+    const norm = Math.max(0, Math.min(0.9999, (Number.isFinite(b) ? b : 0) / span));
+    const col = Math.max(0, Math.min(3, Math.floor(norm * 4)));
     cols[col].add(clampPlaybackMidiToRange(m));
   }
   liveNotationStaffMelodyFourCols = cols.map((s) => [...s].sort((a, b) => a - b));
@@ -5029,8 +5208,82 @@ function wireProgressionControls() {
 
 function wireGlobalControls() {
   const audioToggles = document.querySelectorAll(".js-audio-toggle");
-  const FX_KEYS = ["reverb", "fader", "delay", "echo", "chorus"];
-  const FX_STORAGE_KEY = "hl.fx.state.v1";
+  const FX_STORAGE_KEY = "hl.fx.state.v3";
+  const FX_SCHEMA = {
+    reverb: { id: "fxReverb", kind: "pct01" },
+    fader: { id: "fxFader", kind: "pct01" },
+    delay: { id: "fxDelay", kind: "pct01" },
+    echo: { id: "fxEcho", kind: "pct01" },
+    chorus: { id: "fxChorus", kind: "pct01" },
+    lfoRate: { id: "fxLfoRate", kind: "rate10", min: 0.1, max: 8, scale: 10 },
+    lfoDepth: { id: "fxLfoDepth", kind: "pct01" },
+    tremolo: { id: "fxTremolo", kind: "pct01" },
+    tremoloRate: { id: "fxTremoloRate", kind: "rate10", min: 0.1, max: 12, scale: 10 },
+    tremoloDepth: { id: "fxTremoloDepth", kind: "pct01" },
+    autoPan: { id: "fxAutoPan", kind: "pct01" },
+    autoPanRate: { id: "fxAutoPanRate", kind: "rate10", min: 0.1, max: 8, scale: 10 },
+    autoPanDepth: { id: "fxAutoPanDepth", kind: "pct01" },
+  };
+  const FX_KEYS = Object.keys(FX_SCHEMA);
+  const FX_LABELS = {
+    reverb: "Reverb",
+    fader: "Fader",
+    delay: "Delay",
+    echo: "Echo",
+    chorus: "Chorus",
+    lfoRate: "LFO Hz",
+    lfoDepth: "LFO Depth",
+    tremolo: "Tremolo",
+    tremoloRate: "Tremolo Hz",
+    tremoloDepth: "Tremolo Depth",
+    autoPan: "Auto-pan",
+    autoPanRate: "Auto-pan Hz",
+    autoPanDepth: "Auto-pan Depth",
+  };
+
+  function ensureFxSliderControl(key) {
+    const spec = FX_SCHEMA[key];
+    if (!spec) return;
+    if (document.getElementById(spec.id)) return;
+    const host = document.querySelector(".fx-controls");
+    if (!host) return;
+    const legacyBtnMap = {
+      reverb: "btnFxReverb",
+      fader: "btnFxFader",
+      delay: "btnFxDelay",
+      echo: "btnFxEcho",
+      chorus: "btnFxChorus",
+    };
+    const legacyBtnId = legacyBtnMap[key];
+    if (legacyBtnId) {
+      const old = document.getElementById(legacyBtnId);
+      if (old) old.remove();
+    }
+    const label = document.createElement("label");
+    label.className = "fx-slider";
+    const title = document.createElement("span");
+    title.textContent = FX_LABELS[key] || key;
+    const input = document.createElement("input");
+    input.type = "range";
+    input.id = spec.id;
+    input.step = "1";
+    if (spec.kind === "rate10") {
+      const min = Number(spec.min ?? 0.1);
+      const max = Number(spec.max ?? 8);
+      const scale = Number(spec.scale || 10);
+      input.min = String(Math.round(min * scale));
+      input.max = String(Math.round(max * scale));
+      input.value = String(Math.round((min + max) * 0.5 * scale));
+    } else {
+      input.min = "0";
+      input.max = "100";
+      input.value = "0";
+    }
+    label.appendChild(title);
+    label.appendChild(input);
+    host.appendChild(label);
+  }
+  FX_KEYS.forEach((k) => ensureFxSliderControl(k));
 
   function setAudioButtonState(state) {
     // state: false | true | "loading"
@@ -5129,19 +5382,35 @@ function wireGlobalControls() {
     });
   });
 
-  const fxButtons = {
-    reverb: document.getElementById("btnFxReverb"),
-    fader: document.getElementById("btnFxFader"),
-    delay: document.getElementById("btnFxDelay"),
-    echo: document.getElementById("btnFxEcho"),
-    chorus: document.getElementById("btnFxChorus"),
+  const fxSliders = Object.fromEntries(
+    FX_KEYS.map((k) => [k, document.getElementById(FX_SCHEMA[k].id)]),
+  );
+  const decodeSlider = (k, rawValue) => {
+    const spec = FX_SCHEMA[k];
+    const n = Number(rawValue);
+    if (!Number.isFinite(n)) return 0;
+    if (spec.kind === "rate10") {
+      const sc = spec.scale || 10;
+      const v = n / sc;
+      return Math.max(spec.min ?? 0.1, Math.min(spec.max ?? 8, v));
+    }
+    return Math.max(0, Math.min(1, n / 100));
   };
-  const syncFxButtons = () => {
+  const encodeSlider = (k, value) => {
+    const spec = FX_SCHEMA[k];
+    const v = Number(value);
+    if (spec.kind === "rate10") {
+      const sc = spec.scale || 10;
+      return String(Math.round((Number.isFinite(v) ? v : spec.min || 0.1) * sc));
+    }
+    return String(Math.round(Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0)) * 100));
+  };
+  const syncFxSliders = () => {
     for (const k of FX_KEYS) {
-      const b = fxButtons[k];
-      if (!b) continue;
-      const on = !!audio.fxState?.[k];
-      b.setAttribute("aria-pressed", on ? "true" : "false");
+      const s = fxSliders[k];
+      if (!s) continue;
+      s.value = encodeSlider(k, audio.fxState?.[k]);
+      updateSliderValueLabel(s);
     }
   };
   try {
@@ -5149,27 +5418,37 @@ function wireGlobalControls() {
     if (raw) {
       const saved = JSON.parse(raw);
       for (const k of FX_KEYS) {
-        if (typeof saved?.[k] === "boolean") audio.fxState[k] = saved[k];
+        if (saved?.[k] == null) continue;
+        audio.fxState[k] = decodeSlider(k, encodeSlider(k, saved[k]));
       }
     }
   } catch (_) {
     /* storage opcional */
   }
-  syncFxButtons();
-  const onFxToggle = (k) => {
-    audio.fxState[k] = !audio.fxState[k];
-    if (audio.ctx) audio.setFxEnabled(k, audio.fxState[k]);
+  syncFxSliders();
+  const persistFxState = () => {
     try {
       localStorage.setItem(FX_STORAGE_KEY, JSON.stringify(audio.fxState));
     } catch (_) {
       /* storage opcional */
     }
-    syncFxButtons();
+  };
+  const onFxSliderInput = (k, rawValue) => {
+    audio.fxState[k] = decodeSlider(k, rawValue);
+    if (audio.ctx) audio.applyFxState();
+    persistFxState();
   };
   for (const k of FX_KEYS) {
-    const b = fxButtons[k];
-    if (!b) continue;
-    b.addEventListener("click", () => onFxToggle(k));
+    const s = fxSliders[k];
+    if (!s) continue;
+    s.addEventListener("input", () => {
+      onFxSliderInput(k, s.value);
+      updateSliderValueLabel(s);
+    });
+    s.addEventListener("change", () => {
+      onFxSliderInput(k, s.value);
+      updateSliderValueLabel(s);
+    });
   }
 
   // Export MP3 — abre dialog; dentro, o user escolhe modo e inicia.
@@ -5497,7 +5776,28 @@ function wireGlobalControls() {
   wireNotationBassStaffToggle();
 
   // Rótulos de valor ao lado de sliders / inputs numéricos.
-  const valueDisplayIds = ["harmVol", "harmonyBassVol", "droneVol", "slotsVol", "masterGain", "globalBpm", "progVol"];
+  const valueDisplayIds = [
+    "harmVol",
+    "harmonyBassVol",
+    "droneVol",
+    "slotsVol",
+    "masterGain",
+    "globalBpm",
+    "progVol",
+    "fxReverb",
+    "fxFader",
+    "fxDelay",
+    "fxEcho",
+    "fxChorus",
+    "fxLfoRate",
+    "fxLfoDepth",
+    "fxTremolo",
+    "fxTremoloRate",
+    "fxTremoloDepth",
+    "fxAutoPan",
+    "fxAutoPanRate",
+    "fxAutoPanDepth",
+  ];
   const valueSuffix = {
     harmVol: "%",
     harmonyBassVol: "%",
@@ -5506,6 +5806,19 @@ function wireGlobalControls() {
     masterGain: "%",
     globalBpm: " BPM",
     progVol: "%",
+    fxReverb: "%",
+    fxFader: "%",
+    fxDelay: "%",
+    fxEcho: "%",
+    fxChorus: "%",
+    fxLfoRate: " Hz",
+    fxLfoDepth: "%",
+    fxTremolo: "%",
+    fxTremoloRate: " Hz",
+    fxTremoloDepth: "%",
+    fxAutoPan: "%",
+    fxAutoPanRate: " Hz",
+    fxAutoPanDepth: "%",
   };
   function updateSliderValueLabel(el) {
     if (!el || !el.dataset) return;
@@ -5514,7 +5827,12 @@ function wireGlobalControls() {
     const span = document.getElementById(tag);
     if (span) {
       const suf = valueSuffix[el.id] || "";
-      span.textContent = `${el.value}${suf}`;
+      const vRaw = Number(el.value);
+      const v =
+        (el.id === "fxLfoRate" || el.id === "fxTremoloRate" || el.id === "fxAutoPanRate") && Number.isFinite(vRaw)
+          ? (vRaw / 10).toFixed(1)
+          : el.value;
+      span.textContent = `${v}${suf}`;
     }
   }
   valueDisplayIds.forEach((id) => {
@@ -5642,6 +5960,8 @@ function wireGlobalControls() {
         );
       }
     }
+
+    scheduleMelodyStaffHighlights(midis, times, durs, t0Ui, () => myToken === scaleLoopToken);
 
     renderScaleSeqPreview(degs, midis);
     scheduleScaleSeqStripHighlights(t0Ui, times, durs, myToken, ctxNow);

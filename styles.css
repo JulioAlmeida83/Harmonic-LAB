@@ -97,15 +97,25 @@ h2 {
 .fx-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
-  align-items: center;
+  gap: 0.5rem;
+  align-items: flex-end;
 }
 
-.btn-fx[aria-pressed="true"] {
-  border-color: rgba(92, 225, 184, 0.7);
-  background: linear-gradient(180deg, #21403a, #1a322d);
-  color: #e9fff7;
-  box-shadow: 0 0 0 1px rgba(92, 225, 184, 0.25);
+.fx-slider {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 90px;
+}
+
+.fx-slider span {
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.1;
+}
+
+.fx-slider input[type="range"] {
+  width: 96px;
+  accent-color: var(--accent);
 }
 
 .btn-mode {

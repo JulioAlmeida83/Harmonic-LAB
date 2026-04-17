@@ -38,11 +38,58 @@
         aria-label="Abrir diálogo de exportação MP3"
       >Exportar MP3</button>
       <div class="fx-controls" role="group" aria-label="Efeitos de áudio">
-        <button type="button" id="btnFxReverb" class="btn btn-sm btn-fx" aria-pressed="false" title="Ativar/desativar Reverb">Reverb</button>
-        <button type="button" id="btnFxFader" class="btn btn-sm btn-fx" aria-pressed="false" title="Ativar/desativar Fader">Fader</button>
-        <button type="button" id="btnFxDelay" class="btn btn-sm btn-fx" aria-pressed="false" title="Ativar/desativar Delay">Delay</button>
-        <button type="button" id="btnFxEcho" class="btn btn-sm btn-fx" aria-pressed="false" title="Ativar/desativar Echo">Echo</button>
-        <button type="button" id="btnFxChorus" class="btn btn-sm btn-fx" aria-pressed="false" title="Ativar/desativar Chorus">Chorus</button>
+        <label class="fx-slider" title="Ambiência da sala (wet reverb)">
+          <span>Reverb</span>
+          <input type="range" id="fxReverb" min="0" max="100" step="1" value="0" />
+        </label>
+        <label class="fx-slider" title="Atenuação geral pós-efeitos (fader)">
+          <span>Fader</span>
+          <input type="range" id="fxFader" min="0" max="100" step="1" value="0" />
+        </label>
+        <label class="fx-slider" title="Delay curto rítmico">
+          <span>Delay</span>
+          <input type="range" id="fxDelay" min="0" max="100" step="1" value="0" />
+        </label>
+        <label class="fx-slider" title="Echo longo com feedback">
+          <span>Echo</span>
+          <input type="range" id="fxEcho" min="0" max="100" step="1" value="0" />
+        </label>
+        <label class="fx-slider" title="Mistura de chorus">
+          <span>Chorus</span>
+          <input type="range" id="fxChorus" min="0" max="100" step="1" value="0" />
+        </label>
+        <label class="fx-slider" title="Oscilador de modulação (LFO): velocidade">
+          <span>LFO Hz</span>
+          <input type="range" id="fxLfoRate" min="1" max="80" step="1" value="9" />
+        </label>
+        <label class="fx-slider" title="Oscilador de modulação (LFO): profundidade">
+          <span>LFO Depth</span>
+          <input type="range" id="fxLfoDepth" min="0" max="100" step="1" value="35" />
+        </label>
+        <label class="fx-slider" title="Tremolo: quantidade de modulação de volume">
+          <span>Tremolo</span>
+          <input type="range" id="fxTremolo" min="0" max="100" step="1" value="0" />
+        </label>
+        <label class="fx-slider" title="Tremolo: velocidade em Hz">
+          <span>Tremolo Hz</span>
+          <input type="range" id="fxTremoloRate" min="1" max="120" step="1" value="32" />
+        </label>
+        <label class="fx-slider" title="Tremolo: profundidade">
+          <span>Tremolo Depth</span>
+          <input type="range" id="fxTremoloDepth" min="0" max="100" step="1" value="40" />
+        </label>
+        <label class="fx-slider" title="Auto-pan: quantidade de panorama estéreo">
+          <span>Auto-pan</span>
+          <input type="range" id="fxAutoPan" min="0" max="100" step="1" value="0" />
+        </label>
+        <label class="fx-slider" title="Auto-pan: velocidade em Hz">
+          <span>Auto-pan Hz</span>
+          <input type="range" id="fxAutoPanRate" min="1" max="80" step="1" value="12" />
+        </label>
+        <label class="fx-slider" title="Auto-pan: profundidade">
+          <span>Auto-pan Depth</span>
+          <input type="range" id="fxAutoPanDepth" min="0" max="100" step="1" value="50" />
+        </label>
       </div>
     </div>
   </header>
