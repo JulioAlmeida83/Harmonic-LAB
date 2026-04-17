@@ -4924,6 +4924,18 @@ function wireGlobalControls() {
     setAudioButtonState(false);
   }
 
+  /**
+   * Garante áudio activo antes de acções "Play".
+   * Em vez de alert passivo, pede confirmação ao utilizador.
+   */
+  async function ensureAudioEnabledForAction(actionLabel) {
+    if (audioUserEnabled) return true;
+    const ok = confirm(`O áudio está desligado. Quer ativar agora para ${actionLabel}?`);
+    if (!ok) return false;
+    await toggleAudio();
+    return audioUserEnabled;
+  }
+
   audioToggles.forEach((btn) => {
     btn.addEventListener("click", () => {
       void toggleAudio();
@@ -5166,11 +5178,8 @@ function wireGlobalControls() {
     document.querySelectorAll(".js-solo-play").forEach((b) => b.setAttribute("aria-pressed", on ? "true" : "false"));
   }
 
-  const onSoloPlay = () => {
-    if (!audioUserEnabled) {
-      alert("Ligue o motor de áudio primeiro (Ativar áudio).");
-      return;
-    }
+  const onSoloPlay = async () => {
+    if (!(await ensureAudioEnabledForAction("tocar solo"))) return;
     const soundMode = document.getElementById("soundMode")?.value ?? "synth";
     if (soundMode !== "sample" || !audio.instrumentSampler) {
       alert("O solo improvisado usa o banco de amostras. Confirme o modo Instrumento e que o áudio está activo.");
@@ -5206,7 +5215,11 @@ function wireGlobalControls() {
     syncSoloTransportUi();
   };
 
-  document.querySelectorAll(".js-solo-play").forEach((b) => b.addEventListener("click", onSoloPlay));
+  document.querySelectorAll(".js-solo-play").forEach((b) =>
+    b.addEventListener("click", () => {
+      void onSoloPlay();
+    }),
+  );
   document.querySelectorAll(".js-solo-stop").forEach((b) => b.addEventListener("click", onSoloStop));
   const soloEnabledEl = document.getElementById("soloEnabled");
   if (soloEnabledEl) soloEnabledEl.addEventListener("change", syncSoloTransportUi);
@@ -5308,15 +5321,12 @@ function wireGlobalControls() {
   /** Dispara a escala uma vez e, se `loop` está ligado, reagenda até ao utilizador parar. */
   async function runScaleOnce(myToken, iteration = 0) {
     if (myToken !== scaleLoopToken) return;
+    if (!audioUserEnabled) return;
     audio.ensure();
     try {
       await audio.ctx.resume();
     } catch (_) {
       /* ignore */
-    }
-    if (!audioUserEnabled) {
-      audioUserEnabled = true;
-      setAudioButtonState(true);
     }
     syncAudio();
     const tcp = currentTonicPc();
@@ -5423,7 +5433,8 @@ function wireGlobalControls() {
     clearScaleHighlights();
   }
 
-  const onScalePlay = () => {
+  const onScalePlay = async () => {
+    if (!(await ensureAudioEnabledForAction("tocar escala"))) return;
     stopScaleLoop();
     scaleLoopToken += 1;
     void runScaleOnce(scaleLoopToken);
@@ -5443,7 +5454,11 @@ function wireGlobalControls() {
     //     (≤0.3s em pluck, até ~1.5s em sustain) — preço aceitável.
   };
 
-  document.querySelectorAll(".js-scale-play").forEach((b) => b.addEventListener("click", onScalePlay));
+  document.querySelectorAll(".js-scale-play").forEach((b) =>
+    b.addEventListener("click", () => {
+      void onScalePlay();
+    }),
+  );
   document.querySelectorAll(".js-scale-stop").forEach((b) => b.addEventListener("click", onScaleStop));
 
 
