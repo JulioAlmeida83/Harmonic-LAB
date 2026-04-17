@@ -3091,7 +3091,7 @@ function refreshSampleExecutionLoop() {
         ? HLChordNormalizer.normalizeChord(harmMidisRaw, currentBankId())
         : { midis: harmMidisRaw, gainScale: 1, styleOverride: undefined };
       const harmMidis = normH.midis;
-      const harmVol = Number(document.getElementById("harmVol").value) / 100;
+      const harmVol = Math.max(0, Number(document.getElementById("harmVol").value) / 100);
       // Ganho extra aplicado só quando a sequência está ativa. Permite
       // destacá-la em relação à harmonia estática sem forçar o utilizador
       // a mexer no `harmVol` geral. Faixa: 0–200% (slider), default 100%.
@@ -3102,7 +3102,7 @@ function refreshSampleExecutionLoop() {
       const peakHi = progStep ? 0.32 : 0.16;
       // gainScale do perfil aplicado ANTES do clamp: equaliza loudness entre
       // packs (trompete "hot" desce ~0.9, fagote/contrabaixo sobem ~1.05–1.10).
-      const peak = Math.max(0.04, Math.min(peakHi, harmVol * 0.14 * progBoost * (normH.gainScale ?? 1)));
+      const peak = Math.min(peakHi, harmVol * 0.14 * progBoost * (normH.gainScale ?? 1));
       const harmonyStyleRaw = effectiveHarmonyExecStyle();
       const harmonyStyle = resolveStyleOverride(harmonyStyleRaw, normH);
       const absBeat = sampleHarmonyBeatIndex;
@@ -3138,20 +3138,22 @@ function refreshSampleExecutionLoop() {
       }
       clearHarmonyHearTimers();
       const harmHearEvents = [];
-      executeHarmonyPattern({
-        styleKey: harmonyStyle,
-        chord: harmMidis,
-        beat,
-        absBeat,
-        peak,
-        schedule: ({ midi, offset, dur, style, velMult }) => {
-          const mPlay = qExec(midi);
-          harmHearEvents.push({ midi: mPlay, offset, dur });
-          const p = Math.max(0.012, Math.min(perNoteCap, peak * (velMult ?? 1)));
-          audio.instrumentSampler.playNoteAt(audio.harmStabBus, mPlay, t + offset, p, dur, style);
-        },
-      });
-      scheduleHarmonyHearHighlights(t, harmHearEvents, ctxNowUi);
+      if (peak > 0.0005) {
+        executeHarmonyPattern({
+          styleKey: harmonyStyle,
+          chord: harmMidis,
+          beat,
+          absBeat,
+          peak,
+          schedule: ({ midi, offset, dur, style, velMult }) => {
+            const mPlay = qExec(midi);
+            harmHearEvents.push({ midi: mPlay, offset, dur });
+            const p = Math.max(0.006, Math.min(perNoteCap, peak * (velMult ?? 1)));
+            audio.instrumentSampler.playNoteAt(audio.harmStabBus, mPlay, t + offset, p, dur, style);
+          },
+        });
+        scheduleHarmonyHearHighlights(t, harmHearEvents, ctxNowUi);
+      }
       // Mantém compatibilidade com o antigo contador de "arpeggio": alguns
       // pontos do UI ainda podem lê-lo, e é barato atualizar.
       if (harmonyStyle === "arpeggio") sampleHarmonyArpIndex += 1;
@@ -4078,25 +4080,28 @@ function syncAudio() {
         : { midis: harmMidis, gainScale: 1, styleOverride: undefined };
       const stabStyleBase = loopish.has(style) ? "pluck" : style;
       const stabStyle = resolveStyleOverride(stabStyleBase, normStab);
-      const stabPeak = 0.1 * (normStab.gainScale ?? 1);
-      executeHarmonyPattern({
-        styleKey: stabStyle,
-        chord: normStab.midis,
-        beat: 0.26,
-        absBeat: 0,
-        peak: stabPeak,
-        schedule: ({ midi, offset, dur, style: st, velMult }) => {
-          const mPlay = clampPlaybackMidiToRange(midi);
-          audio.instrumentSampler.playNoteAt(
-            audio.harmStabBus,
-            mPlay,
-            t + offset,
-            stabPeak * (velMult ?? 1),
-            Math.min(0.4, dur),
-            st
-          );
-        },
-      });
+      const harmVolCtrl = Math.max(0, Number(document.getElementById("harmVol")?.value ?? 55) / 100);
+      const stabPeak = harmVolCtrl * 0.1 * (normStab.gainScale ?? 1);
+      if (stabPeak > 0.0005) {
+        executeHarmonyPattern({
+          styleKey: stabStyle,
+          chord: normStab.midis,
+          beat: 0.26,
+          absBeat: 0,
+          peak: stabPeak,
+          schedule: ({ midi, offset, dur, style: st, velMult }) => {
+            const mPlay = clampPlaybackMidiToRange(midi);
+            audio.instrumentSampler.playNoteAt(
+              audio.harmStabBus,
+              mPlay,
+              t + offset,
+              stabPeak * (velMult ?? 1),
+              Math.min(0.4, dur),
+              st
+            );
+          },
+        });
+      }
     }
   }
 }
