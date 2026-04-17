@@ -776,6 +776,15 @@ class AudioEngine {
     this.bassSampler = null;
     this._harmStabPrimed = false;
     this._harmStabKey = "";
+    this.fxState = {
+      reverb: false,
+      fader: false,
+      delay: false,
+      echo: false,
+      chorus: false,
+    };
+    this.fxNodes = null;
+    this._chorusLfo = null;
   }
 
   ensure() {
@@ -802,27 +811,84 @@ class AudioEngine {
     this.masterLimiter.release.value = 0.18; // 180 ms
 
     const dry = this.ctx.createGain();
-    dry.gain.value = 0.86;
+    dry.gain.value = 0.96;
     const wet = this.ctx.createGain();
-    wet.gain.value = 0.09;
+    wet.gain.value = 0;
     const conv = this.ctx.createConvolver();
     conv.buffer = makeReverbIR(this.ctx, 1.2);
     conv.normalize = true;
+    const fxOut = this.ctx.createGain();
+    fxOut.gain.value = 1;
+
+    const delayNode = this.ctx.createDelay(1.6);
+    delayNode.delayTime.value = 0.24;
+    const delayFb = this.ctx.createGain();
+    delayFb.gain.value = 0.3;
+    const delayWet = this.ctx.createGain();
+    delayWet.gain.value = 0;
+
+    const echoNode = this.ctx.createDelay(2.4);
+    echoNode.delayTime.value = 0.42;
+    const echoFb = this.ctx.createGain();
+    echoFb.gain.value = 0.42;
+    const echoWet = this.ctx.createGain();
+    echoWet.gain.value = 0;
+
+    const chorusDelay = this.ctx.createDelay(0.08);
+    chorusDelay.delayTime.value = 0.018;
+    const chorusWet = this.ctx.createGain();
+    chorusWet.gain.value = 0;
+    const chorusDepth = this.ctx.createGain();
+    chorusDepth.gain.value = 0.006;
+    const chorusLfo = this.ctx.createOscillator();
+    chorusLfo.type = "sine";
+    chorusLfo.frequency.value = 0.9;
+    chorusLfo.connect(chorusDepth);
+    chorusDepth.connect(chorusDelay.delayTime);
+    chorusLfo.start();
+    this._chorusLfo = chorusLfo;
 
     // master → limiter → (dry + wet via convolver) → destination
     this.masterMix.connect(this.masterLimiter);
     this.masterLimiter.connect(dry);
-    dry.connect(this.ctx.destination);
+    dry.connect(fxOut);
     this.masterLimiter.connect(conv);
     conv.connect(wet);
-    wet.connect(this.ctx.destination);
+    wet.connect(fxOut);
+
+    this.masterLimiter.connect(delayNode);
+    delayNode.connect(delayWet);
+    delayWet.connect(fxOut);
+    delayNode.connect(delayFb);
+    delayFb.connect(delayNode);
+
+    this.masterLimiter.connect(echoNode);
+    echoNode.connect(echoWet);
+    echoWet.connect(fxOut);
+    echoNode.connect(echoFb);
+    echoFb.connect(echoNode);
+
+    this.masterLimiter.connect(chorusDelay);
+    chorusDelay.connect(chorusWet);
+    chorusWet.connect(fxOut);
+
+    fxOut.connect(this.ctx.destination);
 
     // Tap de gravação: MediaStreamDestination recebe o mesmo sinal pós-reverb
     // que vai ao destino. Sem efeito audível — MediaStreamDestination só emite
     // quando um MediaRecorder/consumer subscreve o stream.
     this.recDest = this.ctx.createMediaStreamDestination();
-    dry.connect(this.recDest);
-    wet.connect(this.recDest);
+    fxOut.connect(this.recDest);
+
+    this.fxNodes = {
+      dry,
+      reverbWet: wet,
+      delayWet,
+      echoWet,
+      chorusWet,
+      fxOut,
+    };
+    this.applyFxState();
 
     /* Drone: seno suave + corte grave (menos “electrónico”) */
     this.drone.lpf = this.ctx.createBiquadFilter();
@@ -910,6 +976,21 @@ class AudioEngine {
     if (typeof globalThis.HLInstrumentSampler === "function") {
       this.instrumentSampler = new globalThis.HLInstrumentSampler(this.ctx);
     }
+  }
+
+  setFxEnabled(name, enabled) {
+    if (!this.fxState || !(name in this.fxState)) return;
+    this.fxState[name] = Boolean(enabled);
+    this.applyFxState();
+  }
+
+  applyFxState() {
+    if (!this.fxNodes) return;
+    this.fxNodes.reverbWet.gain.setTargetAtTime(this.fxState.reverb ? 0.15 : 0.0, this.ctx.currentTime, 0.02);
+    this.fxNodes.delayWet.gain.setTargetAtTime(this.fxState.delay ? 0.17 : 0.0, this.ctx.currentTime, 0.02);
+    this.fxNodes.echoWet.gain.setTargetAtTime(this.fxState.echo ? 0.16 : 0.0, this.ctx.currentTime, 0.02);
+    this.fxNodes.chorusWet.gain.setTargetAtTime(this.fxState.chorus ? 0.14 : 0.0, this.ctx.currentTime, 0.02);
+    this.fxNodes.fxOut.gain.setTargetAtTime(this.fxState.fader ? 0.72 : 1.0, this.ctx.currentTime, 0.03);
   }
 
   /**
@@ -4923,6 +5004,8 @@ function wireProgressionControls() {
 
 function wireGlobalControls() {
   const audioToggles = document.querySelectorAll(".js-audio-toggle");
+  const FX_KEYS = ["reverb", "fader", "delay", "echo", "chorus"];
+  const FX_STORAGE_KEY = "hl.fx.state.v1";
 
   function setAudioButtonState(state) {
     // state: false | true | "loading"
@@ -4973,6 +5056,7 @@ function wireGlobalControls() {
         audio.harmStabBus.gain.setValueAtTime(0.58, t);
       }
       applyMasterGainFromUI();
+      audio.applyFxState();
       syncAudio();
       // Zera o contador da sequência só aqui, no start "fresco" do áudio.
       // `refreshSampleExecutionLoop` pode ser chamada durante a execução
@@ -5019,6 +5103,49 @@ function wireGlobalControls() {
       void toggleAudio();
     });
   });
+
+  const fxButtons = {
+    reverb: document.getElementById("btnFxReverb"),
+    fader: document.getElementById("btnFxFader"),
+    delay: document.getElementById("btnFxDelay"),
+    echo: document.getElementById("btnFxEcho"),
+    chorus: document.getElementById("btnFxChorus"),
+  };
+  const syncFxButtons = () => {
+    for (const k of FX_KEYS) {
+      const b = fxButtons[k];
+      if (!b) continue;
+      const on = !!audio.fxState?.[k];
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+  };
+  try {
+    const raw = localStorage.getItem(FX_STORAGE_KEY);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      for (const k of FX_KEYS) {
+        if (typeof saved?.[k] === "boolean") audio.fxState[k] = saved[k];
+      }
+    }
+  } catch (_) {
+    /* storage opcional */
+  }
+  syncFxButtons();
+  const onFxToggle = (k) => {
+    audio.fxState[k] = !audio.fxState[k];
+    if (audio.ctx) audio.setFxEnabled(k, audio.fxState[k]);
+    try {
+      localStorage.setItem(FX_STORAGE_KEY, JSON.stringify(audio.fxState));
+    } catch (_) {
+      /* storage opcional */
+    }
+    syncFxButtons();
+  };
+  for (const k of FX_KEYS) {
+    const b = fxButtons[k];
+    if (!b) continue;
+    b.addEventListener("click", () => onFxToggle(k));
+  }
 
   // Export MP3 — abre dialog; dentro, o user escolhe modo e inicia.
   const btnExport = document.getElementById("btnExport");
