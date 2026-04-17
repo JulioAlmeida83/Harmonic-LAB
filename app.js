@@ -1582,10 +1582,10 @@ const NOTATION_SHOW_CHORD_STAFF_LS = "hl_notation_show_chord_staff";
 /** Preferência persistida: mostrar pauta de baixo/base. */
 const NOTATION_SHOW_BASS_STAFF_LS = "hl_notation_show_bass_staff";
 const STAFF_NATURAL_PC = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
-/** Faixa visual-alvo: Bb..F# em torno de C4 para manter notas junto da pauta. */
-const STAFF_VISUAL_MIDI_MIN = 58; // Bb3
-const STAFF_VISUAL_MIDI_MAX = 66; // F#4
-const STAFF_VISUAL_MIDI_CENTER = 60; // C4 (Dó central)
+/** Limite visual: no máximo 2 linhas suplementares em clave de Sol. */
+const STAFF_VISUAL_MIDI_MIN = 57; // A3 (2 linhas abaixo)
+const STAFF_VISUAL_MIDI_MAX = 84; // C6 (2 linhas acima)
+const STAFF_VISUAL_MIDI_CENTER = 69; // A4 (centro visual aproximado)
 
 /** Ordem diatónica E F G A B | C D … a partir de E3 para indexar passos no pentagrama. */
 const LIVE_STAFF_E4 = (() => {
@@ -1625,6 +1625,14 @@ function parseMidiStaffSpelling(midi, preferFl) {
   else if (rest.includes("#")) acc = "♯";
   const name = `${base}${octave}`;
   return { letter, octave, acc, name };
+}
+
+/** Etiqueta para partitura em convenção PT/BR (C4 científico aparece como C3). */
+function notationLabelPt(midi, preferFl) {
+  const pc = ((midi % 12) + 12) % 12;
+  const pitch = pcToName(pc, preferFl);
+  const octaveSci = Math.floor(midi / 12) - 1;
+  return `${pitch}${octaveSci - 1}`;
 }
 
 /** Mantém a nota escrita próxima da pauta (Bb3..F#4), centrando no C4. */
@@ -1861,6 +1869,27 @@ function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
     }
   }
 
+  function drawLedgerLines(g, x, step) {
+    // Linhas da pauta principal: steps 0,2,4,6,8. Suplementares:
+    // abaixo: -2, -4; acima: 10, 12 (limite de 2 linhas).
+    const drawAtStep = (s) => {
+      const y = staffBottom0 - s * (lineGap / 2);
+      const lx = document.createElementNS(NS, "line");
+      lx.setAttribute("x1", String(x - 16));
+      lx.setAttribute("x2", String(x + 18));
+      lx.setAttribute("y1", String(y));
+      lx.setAttribute("y2", String(y));
+      lx.setAttribute("stroke", "rgba(255,255,255,0.34)");
+      lx.setAttribute("stroke-width", "1");
+      g.appendChild(lx);
+    };
+    if (step <= -2) {
+      for (let s = -2; s >= step; s -= 2) drawAtStep(s);
+    } else if (step >= 10) {
+      for (let s = 10; s <= step; s += 2) drawAtStep(s);
+    }
+  }
+
   const gRoot = document.createElementNS(NS, "g");
   staffLines(gRoot);
   trebleClef(gRoot);
@@ -1941,16 +1970,7 @@ function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
       }
       placed.push({ x, y });
 
-      if (y > staffBottom0 + 1 || y < staffTop - 1) {
-        const lx = document.createElementNS(NS, "line");
-        lx.setAttribute("x1", String(x - 16));
-        lx.setAttribute("x2", String(x + 18));
-        lx.setAttribute("y1", String(y));
-        lx.setAttribute("y2", String(y));
-        lx.setAttribute("stroke", "rgba(255,255,255,0.34)");
-        lx.setAttribute("stroke-width", "1");
-        gRoot.appendChild(lx);
-      }
+      drawLedgerLines(gRoot, x, stStep);
 
       if (sp.acc) {
         const ax = document.createElementNS(NS, "text");
@@ -1997,7 +2017,7 @@ function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
       cap.setAttribute("fill", "#c5cad6");
       cap.setAttribute("font-size", "8");
       cap.setAttribute("text-anchor", "middle");
-      const wLab = midiNoteLabel(wMidi, pf, "full");
+      const wLab = notationLabelPt(wMidi, pf);
       const cLab = tr !== 0 ? ` (${midiNoteLabel(cMidi, pf, "pitch")})` : "";
       cap.textContent = `${wLab}${cLab}`;
       gRoot.appendChild(cap);
