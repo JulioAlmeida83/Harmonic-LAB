@@ -5474,14 +5474,21 @@ function wireGlobalControls() {
   }
 
   const writtenTransposeEl = document.getElementById("writtenTranspose");
-  if (writtenTransposeEl) writtenTransposeEl.addEventListener("change", () => renderLiveNotationStaff());
+  if (writtenTransposeEl) {
+    writtenTransposeEl.addEventListener("change", () => {
+      // Rebuild completo para refletir imediatamente a transposição escrita
+      // em todas as pautas (principal, harmonia e baixo/base).
+      rebuildNotationStaffFromCurrentBeatThenRender();
+    });
+  }
   const btnTransposeBbEl = document.getElementById("btnTransposeBb");
   if (btnTransposeBbEl) {
     btnTransposeBbEl.addEventListener("click", () => {
       const s = document.getElementById("writtenTranspose");
       if (s) {
-        s.value = "2";
-        renderLiveNotationStaff();
+        // Alterna rápido: Concerto (0) <-> Bb (+2)
+        s.value = s.value === "2" ? "0" : "2";
+        s.dispatchEvent(new Event("change", { bubbles: true }));
       }
     });
   }
