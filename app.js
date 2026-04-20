@@ -733,6 +733,7 @@ function writeSoloComboBank(items) {
 function readCurrentSoloComboState() {
   return {
     tonic: document.getElementById("tonic")?.value ?? "C",
+    cycleTraverseMode: document.getElementById("cycleTraverseMode")?.value ?? "off",
     scaleType: document.getElementById("scaleType")?.value ?? "major",
     soloContextMode: document.getElementById("soloContextMode")?.value ?? "static_key",
     soloScaleType: document.getElementById("soloScaleType")?.value ?? "",
@@ -759,6 +760,7 @@ function applySoloComboState(state) {
     el.dispatchEvent(new Event("change", { bubbles: true }));
   };
   setVal("tonic", state.tonic);
+  setVal("cycleTraverseMode", state.cycleTraverseMode);
   setVal("scaleType", state.scaleType);
   setVal("soloContextMode", state.soloContextMode);
   setVal("soloScaleType", state.soloScaleType);
@@ -1660,6 +1662,7 @@ let sampleSlotsArpIndex = 0;
 let sampleBassPatIndex = 0;
 let soloPatIndex = 0;
 let lastSoloChordSig = "";
+let lastCycleAdvanceSoloBeat = -1;
 /** MIDI do acorde na faixa «ouvir harmonia» / pills (concerto). */
 let liveNotationHarmonyMidis = [];
 /** Pentagrama: 4 compassos — tônica, baixo, slots (sem harmonia do acorde). */
@@ -3035,6 +3038,7 @@ function stopSampleExecutionLoop() {
   sampleSlotsArpIndex = 0;
   sampleBassPatIndex = 0;
   soloPatIndex = 0;
+  lastCycleAdvanceSoloBeat = -1;
   lastSoloChordSig = "";
   lastHarmHearStripSig = "";
   clearHarmonyHearVisuals();
@@ -3949,10 +3953,10 @@ function refreshSampleExecutionLoop() {
     const soloEnabled = document.getElementById("soloEnabled")?.checked;
     const soloSampler = currentSoloSampler();
     if (soloEnabled && soloSampler) {
-      const ctxSolo = resolveSoloChordAndScale(tcp);
-      const chord = ctxSolo.chord;
+      let tcpSolo = tcp;
+      let ctxSolo = resolveSoloChordAndScale(tcpSolo);
+      let chord = ctxSolo.chord;
       if (chord && chord.intervals && chord.rootPc != null) {
-        const scaleIvals = ctxSolo.scaleIvals;
         const soloPattern = document.getElementById("soloPattern")?.value || "arp_up";
         const soloRhythm = effectiveSoloRhythmId();
         const soloVol = Number(document.getElementById("soloVol")?.value ?? 60) / 100;
@@ -3969,55 +3973,70 @@ function refreshSampleExecutionLoop() {
         const startGlobalBeat = ctxSolo.fromProgression ? progState.beatCounter : sampleHarmonyBeatIndex;
 
         if (soloIsFirstBeatOfQuantizeWindow(ctxSolo)) {
-          const soloEvents = buildSoloEventsForContext({
-            chord,
-            scaleIvals,
-            scaleKey: ctxSolo.scaleKey,
-            fromProgression: ctxSolo.fromProgression,
-            patternId: soloPattern,
-            rhythmId: soloRhythm,
-            soloOct,
-            beatSec: beat,
-            startGlobalBeat,
-            windowBeats,
-            patternStartIndex: soloPatIndex,
-            offBase: 0,
-          });
-          if (soloEvents.notes.length > 0) {
-            soloPatIndex = soloEvents.nextPatternIndex;
-            const peak = Math.max(0.04, Math.min(0.2, soloVol * 0.18));
-            const pfSolo = preferFlats();
-            const soloMidisPlayed = [];
-            const soloOffs = [];
-            const soloDurs = [];
-            for (const ev of soloEvents.notes) {
-              const midi = qExec(ev.midi);
-              soloMidisPlayed.push(midi);
-              soloOffs.push(ev.off);
-              soloDurs.push(ev.dur);
-              soloSampler.playNoteAt(audio.scaleSampleBus, midi, t + ev.off, peak, ev.dur);
+          if (
+            cycleTraverseStepSemitones() &&
+            Number.isFinite(startGlobalBeat) &&
+            startGlobalBeat > 0 &&
+            startGlobalBeat !== lastCycleAdvanceSoloBeat
+          ) {
+            if (advanceTonicByCycleStep()) {
+              lastCycleAdvanceSoloBeat = startGlobalBeat;
+              tcpSolo = currentTonicPc();
+              ctxSolo = resolveSoloChordAndScale(tcpSolo);
+              chord = ctxSolo.chord;
             }
-            if (soloHear) {
-              const wLabel = windowBeats > PROG_BEATS_PER_BAR ? `${windowBeats / PROG_BEATS_PER_BAR} comp.` : "1 comp.";
-              const soloPitchLine = soloMidisPlayed.map((m) => writtenMidiNoteLabel(m, pfSolo, "pitch")).join(" · ");
-              soloHear.textContent = soloMidisPlayed.length
-                ? `Solo (frase em ${wLabel}, quantizada ao acorde): ${soloPitchLine}`
-                : "";
+          }
+          if (chord && chord.intervals && chord.rootPc != null) {
+            const soloEvents = buildSoloEventsForContext({
+              chord,
+              scaleIvals: ctxSolo.scaleIvals,
+              scaleKey: ctxSolo.scaleKey,
+              fromProgression: ctxSolo.fromProgression,
+              patternId: soloPattern,
+              rhythmId: soloRhythm,
+              soloOct,
+              beatSec: beat,
+              startGlobalBeat,
+              windowBeats,
+              patternStartIndex: soloPatIndex,
+              offBase: 0,
+            });
+            if (soloEvents.notes.length > 0) {
+              soloPatIndex = soloEvents.nextPatternIndex;
+              const peak = Math.max(0.04, Math.min(0.2, soloVol * 0.18));
+              const pfSolo = preferFlats();
+              const soloMidisPlayed = [];
+              const soloOffs = [];
+              const soloDurs = [];
+              for (const ev of soloEvents.notes) {
+                const midi = qExec(ev.midi);
+                soloMidisPlayed.push(midi);
+                soloOffs.push(ev.off);
+                soloDurs.push(ev.dur);
+                soloSampler.playNoteAt(audio.scaleSampleBus, midi, t + ev.off, peak, ev.dur);
+              }
+              if (soloHear) {
+                const wLabel = windowBeats > PROG_BEATS_PER_BAR ? `${windowBeats / PROG_BEATS_PER_BAR} comp.` : "1 comp.";
+                const soloPitchLine = soloMidisPlayed.map((m) => writtenMidiNoteLabel(m, pfSolo, "pitch")).join(" · ");
+                soloHear.textContent = soloMidisPlayed.length
+                  ? `Solo (frase em ${wLabel}, quantizada ao acorde): ${soloPitchLine}`
+                  : "";
+              }
+              setMelodyNotationFromTimedNotes(soloMidisPlayed, soloOffs, beat);
+              renderLiveNotationStaff();
+              scheduleMelodyStaffHighlights(
+                soloMidisPlayed,
+                soloOffs,
+                soloDurs,
+                beat,
+                t,
+                () => audioUserEnabled,
+              );
+              renderDashSoloPills(soloMidisPlayed);
+            } else if (soloHear) {
+              soloHear.textContent = "";
+              clearDashSoloPills();
             }
-            setMelodyNotationFromTimedNotes(soloMidisPlayed, soloOffs, beat);
-            renderLiveNotationStaff();
-            scheduleMelodyStaffHighlights(
-              soloMidisPlayed,
-              soloOffs,
-              soloDurs,
-              beat,
-              t,
-              () => audioUserEnabled,
-            );
-            renderDashSoloPills(soloMidisPlayed);
-          } else if (soloHear) {
-            soloHear.textContent = "";
-            clearDashSoloPills();
           }
         }
       } else {
@@ -4315,6 +4334,29 @@ function currentIvals() {
 
 function currentTonicPc() {
   return parseTonic(document.getElementById("tonic").value);
+}
+
+function cycleTraverseMode() {
+  return document.getElementById("cycleTraverseMode")?.value || "off";
+}
+
+function cycleTraverseStepSemitones() {
+  const mode = cycleTraverseMode();
+  if (mode === "fifths") return 7;
+  if (mode === "fourths") return 5;
+  return 0;
+}
+
+function advanceTonicByCycleStep() {
+  const step = cycleTraverseStepSemitones();
+  if (!step) return false;
+  const tonicEl = document.getElementById("tonic");
+  if (!tonicEl) return false;
+  const nextPc = ((currentTonicPc() + step) % 12 + 12) % 12;
+  const nextName = pcToName(nextPc, preferFlats());
+  tonicEl.value = nextName;
+  tonicEl.dispatchEvent(new Event("change", { bubbles: true }));
+  return true;
 }
 
 function notationConcertWrittenKeyLabel(tr) {
@@ -6228,6 +6270,7 @@ function wireGlobalControls() {
 
   [
     "tonic",
+    "cycleTraverseMode",
     "scaleType",
     "preferFlats",
     "harmonyBase",
@@ -6254,6 +6297,18 @@ function wireGlobalControls() {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", onContextChange);
   });
+
+  const btnCycleStep = document.getElementById("btnCycleStep");
+  if (btnCycleStep) {
+    btnCycleStep.addEventListener("click", () => {
+      const ok = advanceTonicByCycleStep();
+      if (!ok) {
+        const modeSel = document.getElementById("cycleTraverseMode");
+        if (modeSel && modeSel.value === "off") modeSel.value = "fifths";
+        advanceTonicByCycleStep();
+      }
+    });
+  }
 
   // Handler dedicado: quando o utilizador ATIVA "Silenciar acorde da harmonia",
   // queremos que o chord tail já despachado desapareça imediatamente — e não
@@ -6638,6 +6693,9 @@ function wireGlobalControls() {
       /* ignore */
     }
     syncAudio();
+    if (iteration > 0) {
+      advanceTonicByCycleStep();
+    }
     const tcp = currentTonicPc();
     const ivals = currentIvals();
     const dirRaw = document.getElementById("seqDir").value;

@@ -192,6 +192,25 @@
         <input type="checkbox" id="preferFlats" />
         <span>Preferir bemóis</span>
       </label>
+      <label class="field field-compact" title="Percorre as tonalidades automaticamente durante o estudo.">
+        <span>Ciclo tonal</span>
+        <select id="cycleTraverseMode">
+          <option value="off" selected>Desligado</option>
+          <option value="fifths">Ciclo das quintas</option>
+          <option value="fourths">Ciclo das quartas</option>
+        </select>
+      </label>
+      <div class="field field-compact">
+        <span>Passo tonal</span>
+        <button
+          type="button"
+          id="btnCycleStep"
+          class="btn btn-compact"
+          title="Avança uma tonalidade no ciclo selecionado"
+        >
+          Avançar
+        </button>
+      </div>
       <label class="field field-compact">
         <span>BPM</span>
         <input type="number" id="globalBpm" min="40" max="220" value="96" />
