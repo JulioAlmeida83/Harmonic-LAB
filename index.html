@@ -524,11 +524,23 @@
 
   <section class="panel panel-progression is-advanced" aria-label="Sequência de acordes (avançado)">
     <div class="prog-head">
-      <h2>Sequência de acordes <small class="prog-hint">Substitui a harmonia estática por uma progressão que avança por compassos.</small></h2>
+      <h2>
+        Sequência de acordes
+        <small class="prog-hint">
+          A sequência avança por compassos de forma independente. Opcionalmente toca acordes e baixo alinhados a cada passo (acompanhamento progressivo); desligado, serve de referência para solo/partitura enquanto o som segue a harmonia estática.
+        </small>
+      </h2>
       <div class="prog-tools">
         <label class="field field-check" title="Substitui a harmonia base estática pela sequência editada abaixo">
           <input type="checkbox" id="progEnabled" />
           <span>Ativar sequência</span>
+        </label>
+        <label
+          class="field field-check"
+          title="Ligado: acordes e baixo seguem cada passo da sequência (base progressiva para treinar). Desligado: a sequência continua a guiar o contexto (solo «Seguir sequência», painel, ciclo de quintas), mas o som usa só harmonia/baixo estáticos."
+        >
+          <input type="checkbox" id="progAccompaniment" checked />
+          <span>Acompanhamento sonoro da sequência</span>
         </label>
         <label class="field slim">
           <span>Preset</span>

@@ -488,7 +488,7 @@ function effectiveStaticHarmonyIvals() {
 
 /** Padrão rítmico/arpejo: sequência activa usa `progHarmonyStyle`; caso contrário `harmonyStyle`. */
 function effectiveHarmonyExecStyle() {
-  if (getActiveProgressionStep()) {
+  if (getActiveProgressionStep() && progressionAccompanimentHeard()) {
     const p = document.getElementById("progHarmonyStyle")?.value;
     if (p) return p;
   }
@@ -820,6 +820,10 @@ function readCurrentSoloComboState() {
     harmonyStyle: document.getElementById("harmonyStyle")?.value ?? "sustain",
     progHarmonyStyle: document.getElementById("progHarmonyStyle")?.value ?? "sustain",
     progEnabled: !!document.getElementById("progEnabled")?.checked,
+    progAccompaniment: (() => {
+      const e = document.getElementById("progAccompaniment");
+      return e ? !!e.checked : true;
+    })(),
     progressionSteps: progReadSteps(),
   };
 }
@@ -846,6 +850,9 @@ function applySoloComboState(state) {
   setVal("harmonyBase", state.harmonyBase);
   setVal("harmonyStyle", state.harmonyStyle);
   setVal("progHarmonyStyle", state.progHarmonyStyle);
+  if (typeof state.progAccompaniment === "boolean") {
+    setVal("progAccompaniment", state.progAccompaniment);
+  }
   const pe = document.getElementById("progEnabled");
   if (pe && typeof state.progEnabled === "boolean") {
     pe.checked = state.progEnabled;
@@ -3818,16 +3825,17 @@ function refreshSampleExecutionLoop() {
     }
 
     // Harmonia base (acorde em amostras; pode silenciar só o acorde)
-    // Se a sequência de acordes estiver ativa, a progressão sobrepõe-se à
-    // harmonyBase estática: o acorde vem do step atual; se falhar (sequência
-    // vazia ou inválida), cai no comportamento normal.
+    // Se a sequência estiver activa COM acompanhamento sonoro, os acordes
+    // seguem o passo actual (progressivo). Sem acompanhamento, o som usa só a
+    // harmonia estática; a sequência continua a orientar solo/partitura/UI.
     const progStep = getActiveProgressionStep();
-    const harmIdRaw = progStep
+    const progAudible = !!(progStep && progressionAccompanimentHeard());
+    const harmIdRaw = progAudible
       ? "deg1"
       : document.getElementById("harmonyBase")?.value ?? "off";
     const muteHarmChords = harmonyChordSamplesMuted();
     if (!slotsIsolated && harmIdRaw !== "off" && !muteHarmChords && audio.harmStabBus) {
-      const harmMidisRaw = progStep
+      const harmMidisRaw = progAudible
         ? chordMidisAbsolute(progStep.step.chord, baseOct)
         : harmonyMidis(tcp, effectiveStaticHarmonyIvals(), harmIdRaw, baseOct);
       // --- Normalização por instrumento ---------------------------------
@@ -3838,15 +3846,19 @@ function refreshSampleExecutionLoop() {
         ? HLChordNormalizer.normalizeChord(harmMidisRaw, currentBankId())
         : { midis: harmMidisRaw, gainScale: 1, styleOverride: undefined };
       const harmMidis = normH.midis;
+      const notationHarmMidis =
+        progState.enabled && progStep && !muteHarmChords
+          ? chordMidisAbsolute(progStep.step.chord, baseOct)
+          : harmMidis;
       const harmVol = Math.max(0, Number(document.getElementById("harmVol").value) / 100);
       // Ganho extra aplicado só quando a sequência está ativa. Permite
       // destacá-la em relação à harmonia estática sem forçar o utilizador
       // a mexer no `harmVol` geral. Faixa: 0–200% (slider), default 100%.
       const progVolEl = document.getElementById("progVol");
-      const progBoost = progStep ? Math.max(0, Number(progVolEl?.value ?? 100)) / 100 : 1;
+      const progBoost = progAudible ? Math.max(0, Number(progVolEl?.value ?? 100)) / 100 : 1;
       // Em progressão, abrimos o teto do peak (até 0.32) para que o slider
       // consiga efetivamente aumentar. Sem isso o clamp em 0.16 mascara o boost.
-      const peakHi = progStep ? 0.32 : 0.16;
+      const peakHi = progAudible ? 0.32 : 0.16;
       // gainScale do perfil aplicado ANTES do clamp: equaliza loudness entre
       // packs (trompete "hot" desce ~0.9, fagote/contrabaixo sobem ~1.05–1.10).
       const peak = Math.min(peakHi, harmVol * 0.14 * progBoost * (normH.gainScale ?? 1));
@@ -3854,7 +3866,7 @@ function refreshSampleExecutionLoop() {
       const harmonyStyle = resolveStyleOverride(harmonyStyleRaw, normH);
       const absBeat = sampleHarmonyBeatIndex;
       // Teto de segurança por nota (anti-clip): mais alto quando em progressão.
-      const perNoteCap = progStep ? 0.42 : 0.22;
+      const perNoteCap = progAudible ? 0.42 : 0.22;
 
       // --- Transição limpa entre acordes ---------------------------------
       // Se o acorde mudou (assinatura de MIDIs) e o padrão é do tipo sustain
@@ -3879,9 +3891,11 @@ function refreshSampleExecutionLoop() {
       lastHarmStyle = harmonyStyle;
 
       const ctxNowUi = audio.ctx.currentTime;
-      if (sig !== lastHarmHearStripSig) {
-        lastHarmHearStripSig = sig;
-        renderHarmonyHearPillsFromMidis(harmMidis);
+      syncLiveNotationHarmonyMidis(notationHarmMidis);
+      const uiSig = notationHarmMidis.join(",");
+      if (uiSig !== lastHarmHearStripSig) {
+        lastHarmHearStripSig = uiSig;
+        renderHarmonyHearPillsFromMidis(notationHarmMidis);
       }
       clearHarmonyHearTimers();
       const harmHearEvents = [];
@@ -3907,10 +3921,15 @@ function refreshSampleExecutionLoop() {
     } else {
       clearHarmonyHearTimers();
       const displayMidis = (() => {
+        if (progState.enabled && progStep && !muteHarmChords) {
+          const raw = chordMidisAbsolute(progStep.step.chord, baseOct);
+          const normH = globalThis.HLChordNormalizer
+            ? HLChordNormalizer.normalizeChord(raw, currentBankId())
+            : { midis: raw };
+          return Array.isArray(normH.midis) ? normH.midis : [];
+        }
         if (harmIdRaw === "off") return [];
-        const raw = progStep
-          ? chordMidisAbsolute(progStep.step.chord, baseOct)
-          : harmonyMidis(tcp, effectiveStaticHarmonyIvals(), harmIdRaw, baseOct);
+        const raw = harmonyMidis(tcp, effectiveStaticHarmonyIvals(), harmIdRaw, baseOct);
         const normH = globalThis.HLChordNormalizer
           ? HLChordNormalizer.normalizeChord(raw, currentBankId())
           : { midis: raw };
@@ -3932,9 +3951,9 @@ function refreshSampleExecutionLoop() {
       // Em modo sequência, o baixo segue o acorde atual via ivals sintéticos
       // ancorados no chord.rootPc — os padrões (ostinato 1-5-1-3 etc.) continuam
       // a funcionar com os graus 1/3/5/7 do próprio acorde.
-      const bassTonicPc = progStep ? progStep.step.chord.rootPc : tcp;
-      const bassIvals = progStep ? progSyntheticIvalsForChord(progStep.step.chord) : effectiveStaticHarmonyIvals();
-      const bassHarmId = progStep ? "deg1" : harmIdForBass;
+      const bassTonicPc = progAudible ? progStep.step.chord.rootPc : tcp;
+      const bassIvals = progAudible ? progSyntheticIvalsForChord(progStep.step.chord) : effectiveStaticHarmonyIvals();
+      const bassHarmId = progAudible ? "deg1" : harmIdForBass;
       const bassOff = readHarmonyBassSemitoneOffset();
       const bMidiPattern = nextHarmonyBassMidi(
         bassTonicPc,
@@ -5023,6 +5042,17 @@ function progressionLoopTotalBeats() {
   return totalBars * PROG_BEATS_PER_BAR;
 }
 
+/**
+ * Quando a sequência está activa: tocar acordes e baixo alinhados a cada passo
+ * (acompanhamento progressivo). Se desligado, a sequência continua a guiar o
+ * contexto (solo, partitura, painel), mas o som segue harmonia/baixo estáticos.
+ */
+function progressionAccompanimentHeard() {
+  const el = document.getElementById("progAccompaniment");
+  if (!el) return true;
+  return !!el.checked;
+}
+
 /** Só harmonia do acorde (padrão por batida), para pauta separada. */
 function predictedHarmonyChordMidisForBeat(virtualBeat) {
   const midis = new Set();
@@ -5963,11 +5993,6 @@ function wireProgressionControls() {
       }
       progLoadPreset(key);
       if (preset && preset.value !== key) preset.value = key;
-      const soloCtx = document.getElementById("soloContextMode");
-      if (soloCtx && soloCtx.value !== "progression") {
-        soloCtx.value = "progression";
-        soloCtx.dispatchEvent(new Event("change", { bubbles: true }));
-      }
     });
   }
 
@@ -6406,6 +6431,7 @@ function wireGlobalControls() {
     "harmonyBase",
     "harmonyStyle",
     "progHarmonyStyle",
+    "progAccompaniment",
     "harmonyMuteChords",
     "bassWithHarmonyOff",
     "harmonyBassMode",
