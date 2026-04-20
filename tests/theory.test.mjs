@@ -71,6 +71,7 @@ const {
   resolveSequenceStep,
   resolveSequence,
   stepAtBar,
+  generateSoloDegrees,
 } = theory;
 
 // ---------------------------------------------------------------------------
@@ -940,6 +941,32 @@ describe("stepAtBar — avanço da sequência por compasso", () => {
   test("sequência vazia → null", () => {
     assert.equal(stepAtBar([], 0), null);
     assert.equal(stepAtBar(null, 0), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("generateSoloDegrees — graus do acorde com 7ª inferida", () => {
+  test("chord_degrees_1357_intermediate em tríade maior infere M7 (não duplica 5ª)", () => {
+    const out = generateSoloDegrees(
+      "chord_degrees_1357_intermediate",
+      [0, 4, 7],
+      SCALE_TYPES.major.intervals,
+      0,
+      4,
+    );
+    assert.deepEqual(out, [0, 4, 7, 11]);
+  });
+
+  test("chord_degrees_1357_advanced em tríade menor infere m7 e adiciona 9ª", () => {
+    const out = generateSoloDegrees(
+      "chord_degrees_1357_advanced",
+      [0, 3, 7],
+      SCALE_TYPES.natural_minor.intervals,
+      0,
+      5,
+    );
+    assert.deepEqual(out, [0, 3, 7, 10, 14]);
   });
 });
 

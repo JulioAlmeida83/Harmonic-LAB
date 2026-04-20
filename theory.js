@@ -2158,10 +2158,17 @@ function soloScaleDegreePatSigned(pat, _ci, si, idx, n) {
 
 function chordToneFromIntervals(ci, degree) {
   if (!Array.isArray(ci) || !ci.length) return 0;
+  const inferredTriadSeventh = () => {
+    const third = ci.find((x) => x === 3 || x === 4) ?? ci[1] ?? 4;
+    const fifth = ci.find((x) => x === 7 || x === 6 || x === 8) ?? ci[2] ?? 7;
+    if (fifth === 6) return 9; // dim7 sobre tríade diminuta
+    if (third === 3) return 10; // m7 sobre tríade menor
+    return 11; // M7 por defeito (maior/sus/aug)
+  };
   if (degree === "root") return ci[0] ?? 0;
   if (degree === "third") return ci.find((x) => x === 3 || x === 4) ?? ci[1] ?? 4;
-  if (degree === "fifth") return ci.find((x) => x === 7 || x === 5) ?? ci[2] ?? 7;
-  if (degree === "seventh") return ci.find((x) => x === 10 || x === 11) ?? ci[Math.min(3, ci.length - 1)] ?? 10;
+  if (degree === "fifth") return ci.find((x) => x === 7 || x === 6 || x === 8 || x === 5) ?? ci[2] ?? 7;
+  if (degree === "seventh") return ci.find((x) => x === 9 || x === 10 || x === 11) ?? inferredTriadSeventh();
   if (degree === "ninth") return (ci[0] ?? 0) + 14;
   return ci[0] ?? 0;
 }
