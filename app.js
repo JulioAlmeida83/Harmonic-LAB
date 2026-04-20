@@ -814,6 +814,7 @@ function readCurrentSoloComboState() {
     soloAlignHarmonyWithScale: !!document.getElementById("soloAlignHarmonyWithScale")?.checked,
     soloAutoEnableHarmony: !!document.getElementById("soloAutoEnableHarmony")?.checked,
     soloPattern: document.getElementById("soloPattern")?.value ?? "arp_up",
+    soloChordDegreesRepeatRhythm: !!document.getElementById("soloChordDegreesRepeatRhythm")?.checked,
     soloRhythm: document.getElementById("soloRhythm")?.value ?? "swing",
     soloOctave: document.getElementById("soloOctave")?.value ?? "4",
     harmonyBase: document.getElementById("harmonyBase")?.value ?? "deg1",
@@ -844,7 +845,20 @@ function applySoloComboState(state) {
   setVal("soloScaleType", state.soloScaleType);
   setVal("soloAlignHarmonyWithScale", state.soloAlignHarmonyWithScale);
   setVal("soloAutoEnableHarmony", state.soloAutoEnableHarmony);
-  setVal("soloPattern", state.soloPattern);
+  let migratedPattern = state.soloPattern;
+  let migratedRepeat = state.soloChordDegreesRepeatRhythm;
+  if (migratedPattern === "arp_up_basic") {
+    migratedPattern = "chord_degrees_1357_basic";
+    if (typeof migratedRepeat !== "boolean") migratedRepeat = true;
+  } else if (migratedPattern === "arp_up_intermediate") {
+    migratedPattern = "chord_degrees_1357_intermediate";
+    if (typeof migratedRepeat !== "boolean") migratedRepeat = true;
+  } else if (migratedPattern === "arp_up_advanced") {
+    migratedPattern = "chord_degrees_1357_advanced";
+    if (typeof migratedRepeat !== "boolean") migratedRepeat = true;
+  }
+  setVal("soloPattern", migratedPattern);
+  if (typeof migratedRepeat === "boolean") setVal("soloChordDegreesRepeatRhythm", migratedRepeat);
   setVal("soloRhythm", state.soloRhythm);
   setVal("soloOctave", state.soloOctave);
   setVal("harmonyBase", state.harmonyBase);
@@ -864,6 +878,7 @@ function applySoloComboState(state) {
     progRefreshCifras();
     progRenderStatus();
   }
+  syncSoloChordDegreesRepeatRhythmVisibility();
   refreshSampleExecutionLoop();
 }
 
@@ -2340,6 +2355,9 @@ function buildSoloCurrentCombinationPrintData() {
   const scaleKey = solved?.scaleKey || "major";
   const progMode = (document.getElementById("soloContextMode")?.value ?? "static_key") === "progression";
   const progActive = progMode && progState?.enabled && Array.isArray(progState?.resolved) && progState.resolved.length > 0;
+  const progResolves = !!(progState?.enabled && Array.isArray(progState?.resolved) && progState.resolved.length);
+  const cycleStep = cycleTraverseStepSemitones();
+  const printUsesTonicCycle = !!cycleStep && !progResolves;
   const startBarIdx = Math.floor(globalBeatStart / beatsPerBar);
   const notes = [];
   let patternCursor = 0;
@@ -2364,6 +2382,20 @@ function buildSoloCurrentCombinationPrintData() {
           fromProgression: true,
         };
       }
+    }
+    // Sem sequência activa: se o percurso por ciclo estiver ligado, cada compasso
+    // do impresso avança a tônica como no treino ao vivo (paridade com o motor).
+    if (printUsesTonicCycle) {
+      const effectiveTonic = ((tonicPc + barOffset * cycleStep) % 12 + 12) % 12;
+      const solvedBar = resolveSoloChordAndScale(effectiveTonic);
+      const c = solvedBar.chord;
+      return {
+        chord: c,
+        rootPc: ((c.rootPc % 12) + 12) % 12,
+        scaleIvals: solvedBar.scaleIvals,
+        scaleKey: solvedBar.scaleKey,
+        fromProgression: false,
+      };
     }
     const rootPc = typeof chord?.rootPc === "number" ? ((chord.rootPc % 12) + 12) % 12 : tonicPc;
     return { chord, rootPc, scaleIvals, scaleKey, fromProgression: false };
@@ -2391,6 +2423,7 @@ function buildSoloCurrentCombinationPrintData() {
       windowBeats: beatsPerBar,
       patternStartIndex: patternCursor,
       offBase: barStart,
+      chordDegreesRepeatInRhythm: soloChordDegreesRepeatInRhythm(),
     });
     patternCursor = seg.nextPatternIndex;
     for (const ev of seg.notes) {
@@ -2406,6 +2439,9 @@ function buildSoloCurrentCombinationPrintData() {
     windowEnd: windowBeats * beatSec,
     beatCount: windowBeats,
     usesProgression: progActive,
+    printUsesTonicCycle,
+    cycleStepSemitones: cycleStep,
+    barsPrinted: barsToPrint,
   };
 }
 
@@ -2425,10 +2461,14 @@ function buildSoloEventsForContext(opts) {
   const rootPc = ((Number(chord.rootPc) % 12) + 12) % 12;
   const { attacks } = buildSoloQuantizedTimeline(rhythmId, beatSec, windowBeats, startGlobalBeat);
   if (!attacks.length) return { notes: [], nextPatternIndex: patternStartIndex };
-  // Padrões didáticos de graus do acorde (1–3–5 / 1–3–5–7 / 1–3–5–7–9):
-  // tocam uma única célula por janela quantizada, sem repetir ao longo do
-  // ritmo (ex.: swing com vários ataques).
+  // Padrões didáticos de graus do acorde (1–3–5 / …): uma célula por janela
+  // quando «Repetir no ritmo» está desligado; ligado, preenche todos os ataques.
+  const repeatChordDeg =
+    typeof opts?.chordDegreesRepeatInRhythm === "boolean"
+      ? opts.chordDegreesRepeatInRhythm
+      : soloChordDegreesRepeatInRhythm();
   const patternCellLen = (() => {
+    if (repeatChordDeg) return null;
     switch (patternId) {
       case "chord_degrees_1357_basic":
         return 3;
@@ -2663,9 +2703,18 @@ function renderCurrentSoloCombinationSheetForPrint() {
   const progHint = d.usesProgression
     ? "Fonte harmônica: sequência de acordes ativa."
     : "Fonte harmônica: contexto estático atual.";
+  const cycleHint =
+    d.printUsesTonicCycle && d.cycleStepSemitones
+      ? ` Percurso no papel: ciclo de ${d.cycleStepSemitones === 7 ? "quintas" : "quartas"} (${d.barsPrinted || 4} compassos, 1 tônica por compasso).`
+      : "";
+  const repeatHint = soloChordDegreesPatternIds().has(d.patternId)
+    ? soloChordDegreesRepeatInRhythm()
+      ? " «Repetir no ritmo»: ligado."
+      : " «Repetir no ritmo»: desligado (célula curta por compasso)."
+    : "";
   meta.textContent =
-    `Tônica: ${pcToName(d.tonicPc, preferFlats())}. Escala: ${SCALE_TYPES[d.scaleKey]?.label || d.scaleKey}. ` +
-    `Padrão: ${patternLabel}. Ritmo: ${rhythmLabel}. ${progHint} Guarde como PDF no diálogo de impressão.`;
+    `Tônica inicial: ${pcToName(d.tonicPc, preferFlats())}. Escala: ${SCALE_TYPES[d.scaleKey]?.label || d.scaleKey}. ` +
+    `Padrão: ${patternLabel}. Ritmo: ${rhythmLabel}.${repeatHint} ${progHint}${cycleHint} Guarde como PDF no diálogo de impressão.`;
   wrap.appendChild(meta);
   const block = document.createElement("article");
   block.className = "solo-sheet-print-item";
@@ -2679,9 +2728,11 @@ function renderCurrentSoloCombinationSheetForPrint() {
   renderSoloTimedPrintStaff(staffHost, d.notes, {
     windowEnd: d.windowEnd,
     beatCount: d.beatCount,
-    titleLine: d.usesProgression
-      ? "Frase de 4 compassos com sequência de acordes + ritmo real"
-      : "Frase de 4 compassos com posicionamento rítmico real",
+    titleLine: d.printUsesTonicCycle
+      ? `4 compassos: ciclo de ${d.cycleStepSemitones === 7 ? "quintas" : "quartas"} (1 tônica por compasso) + ritmo`
+      : d.usesProgression
+        ? "Frase de 4 compassos com sequência de acordes + ritmo real"
+        : "Frase de 4 compassos com posicionamento rítmico real",
   });
   wrap.appendChild(block);
   host.textContent = "";
@@ -4113,6 +4164,7 @@ function refreshSampleExecutionLoop() {
               windowBeats,
               patternStartIndex: soloPatIndex,
               offBase: 0,
+              chordDegreesRepeatInRhythm: soloChordDegreesRepeatInRhythm(),
             });
             if (soloEvents.notes.length > 0) {
               soloPatIndex = soloEvents.nextPatternIndex;
@@ -4470,6 +4522,25 @@ function cycleTraverseStepSemitones() {
   if (mode === "fifths") return 7;
   if (mode === "fourths") return 5;
   return 0;
+}
+
+/** Padrões «Graus do acorde» com opção «Repetir no ritmo» na UI. */
+function soloChordDegreesPatternIds() {
+  return new Set(["chord_degrees_1357_basic", "chord_degrees_1357_intermediate", "chord_degrees_1357_advanced"]);
+}
+
+function soloChordDegreesRepeatInRhythm() {
+  const el = document.getElementById("soloChordDegreesRepeatRhythm");
+  return !!el?.checked;
+}
+
+function syncSoloChordDegreesRepeatRhythmVisibility() {
+  const wrap = document.getElementById("soloChordDegreesRepeatWrap");
+  if (!wrap) return;
+  const pat = document.getElementById("soloPattern")?.value ?? "";
+  const show = soloChordDegreesPatternIds().has(pat);
+  wrap.hidden = !show;
+  wrap.setAttribute("aria-hidden", show ? "false" : "true");
 }
 
 function advanceTonicByCycleStep(opts = {}) {
@@ -6418,6 +6489,7 @@ function wireGlobalControls() {
     progRefreshCifras();
     progRenderStatus();
     rebuildNotationStaffFromCurrentBeatThenRender();
+    syncSoloChordDegreesRepeatRhythmVisibility();
     if (suppressLoopRestartOnContextChange) return;
     scheduleSyncAudio();
     refreshSampleExecutionLoop();
@@ -6465,6 +6537,7 @@ function wireGlobalControls() {
     "soloScaleType",
     "soloBankInstrument",
     "soloAlignHarmonyWithScale",
+    "soloChordDegreesRepeatRhythm",
   ].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", onContextChange);
@@ -6474,6 +6547,7 @@ function wireGlobalControls() {
   if (soloPatternEl) {
     soloPatternEl.addEventListener("change", () => {
       syncSoloPatternVocabularyCompatibility("pattern");
+      syncSoloChordDegreesRepeatRhythmVisibility();
     });
   }
   const soloScaleEl = document.getElementById("soloScaleType");
@@ -7144,6 +7218,7 @@ renderDegreeStrip();
 updateScaleStarLabels();
 buildSlots();
 wireGlobalControls();
+syncSoloChordDegreesRepeatRhythmVisibility();
 wireProgressionControls();
 applyVisualIcons();
 progResolveFromUI();

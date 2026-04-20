@@ -686,9 +686,6 @@
               <option value="arp_updown">Arpejo sobe/desce</option>
               <option value="arp_spread">Arpejo aberto (R–5–3–7)</option>
               <option value="chord_degrees_1357">Graus 1–3–5–7 do acorde</option>
-              <option value="arp_up_basic">Arpejo asc. • Iniciante (R–3–5)</option>
-              <option value="arp_up_intermediate">Arpejo asc. • Intermediário (R–3–5–7)</option>
-              <option value="arp_up_advanced">Arpejo asc. • Avançado (R–3–5–7–9)</option>
               <option value="arp_down_basic">Arpejo desc. • Iniciante (5–3–1)</option>
               <option value="arp_down_intermediate">Arpejo desc. • Intermediário (7–5–3–1)</option>
               <option value="arp_down_advanced">Arpejo desc. • Avançado (9–7–5–3–1)</option>
@@ -698,9 +695,9 @@
               <option value="arp_spread_basic">Arpejo aberto • Iniciante (R–5–3)</option>
               <option value="arp_spread_intermediate">Arpejo aberto • Intermediário (R–5–3–7)</option>
               <option value="arp_spread_advanced">Arpejo aberto • Avançado (R–5–3–7–9)</option>
-              <option value="chord_degrees_1357_basic">1–3–5 • Iniciante</option>
-              <option value="chord_degrees_1357_intermediate">1–3–5–7 • Intermediário</option>
-              <option value="chord_degrees_1357_advanced">1–3–5–7–9 • Avançado</option>
+              <option value="chord_degrees_1357_basic">Graus do acorde • Iniciante (1–3–5 / R–3–5)</option>
+              <option value="chord_degrees_1357_intermediate">Graus do acorde • Intermediário (1–3–5–7)</option>
+              <option value="chord_degrees_1357_advanced">Graus do acorde • Avançado (1–3–5–7–9)</option>
               <option value="triad_burst">Tríade em ciclo</option>
               <option value="power_fifth">Power (raiz–quinta–quinta+8va)</option>
             </optgroup>
@@ -755,6 +752,15 @@
             </optgroup>
           </select>
           <small class="solo-flow-help">Aplica uma fórmula sobre a escala/acorde atuais para formar a frase.</small>
+          <div
+            class="field field-check solo-chord-degrees-repeat"
+            id="soloChordDegreesRepeatWrap"
+            hidden
+            title="Para «Graus do acorde» iniciante/intermediário/avançado: ligado repete 1–3–5… em cada ataque do ritmo (arpejo). Desligado toca só uma célula por janela quantizada."
+          >
+            <input type="checkbox" id="soloChordDegreesRepeatRhythm" />
+            <label for="soloChordDegreesRepeatRhythm">Repetir no ritmo</label>
+          </div>
           <small class="solo-flow-help" id="soloPatternVocabHint" aria-live="polite"></small>
         </label>
         <label class="field">
