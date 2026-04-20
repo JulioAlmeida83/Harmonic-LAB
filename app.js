@@ -4050,6 +4050,9 @@ function refreshSampleExecutionLoop() {
         if (soloIsFirstBeatOfQuantizeWindow(ctxSolo)) {
           if (
             cycleTraverseStepSemitones() &&
+            // Com sequência activa, o avanço pelo ciclo tonal faz-se ao fechar
+            // uma volta completa da progressão (ver `progTickBeat` no loop).
+            !(progState.enabled && progState.resolved.length) &&
             Number.isFinite(startGlobalBeat) &&
             startGlobalBeat > 0 &&
             startGlobalBeat !== lastCycleAdvanceSoloBeat
@@ -4142,6 +4145,18 @@ function refreshSampleExecutionLoop() {
     // mudar e `applyScale` estiver ativo, progTickBeat dispara onContextChange
     // via o evento change no select #scaleType.
     progTickBeat();
+    // Ciclo das quintas/quartas + sequência: transpõe a tônica após cada volta
+    // completa da progressão (os romanos mantêm-se; os acordes mudam de tom).
+    const progLoopBeats = progressionLoopTotalBeats();
+    if (
+      loopGen === sampleLoopGeneration &&
+      progLoopBeats > 0 &&
+      cycleTraverseStepSemitones() &&
+      progState.beatCounter > 0 &&
+      progState.beatCounter % progLoopBeats === 0
+    ) {
+      advanceTonicByCycleStep({ suppressLoopRestart: true });
+    }
     nextAt = tickAt + 60 / currentBpm();
     const waitMs = Math.max(20, (nextAt - now) * 1000);
     sampleStepTimer = setTimeout(scheduleNext, waitMs);
@@ -4998,6 +5013,14 @@ function soloIsFirstBeatOfQuantizeWindow(ctxSolo) {
 function progressionStepAtProgBeat(beatCounter) {
   if (!progState.enabled || !progState.resolved.length) return null;
   return stepAtBar(progState.resolved, Math.floor(beatCounter / PROG_BEATS_PER_BAR));
+}
+
+/** Batidas totais numa volta completa da sequência (4/4). 0 se inactiva ou vazia. */
+function progressionLoopTotalBeats() {
+  if (!progState.enabled || !progState.resolved.length) return 0;
+  const totalBars = progState.resolved.reduce((s, st) => s + st.bars, 0);
+  if (!(totalBars > 0)) return 0;
+  return totalBars * PROG_BEATS_PER_BAR;
 }
 
 /** Só harmonia do acorde (padrão por batida), para pauta separada. */
