@@ -537,11 +537,6 @@ function applySoloScenePreset(key) {
   const presets = {
     static_major_walk: () => {
       setVal("soloContextMode", "static_key");
-      const pe0 = document.getElementById("progEnabled");
-      if (pe0?.checked) {
-        pe0.checked = false;
-        pe0.dispatchEvent(new Event("change", { bubbles: true }));
-      }
       setVal("soloScaleType", "");
       setVal("scaleType", "major");
       setVal("soloAlignHarmonyWithScale", true);
@@ -553,11 +548,6 @@ function applySoloScenePreset(key) {
     },
     static_dorian_groove: () => {
       setVal("soloContextMode", "static_key");
-      const pe0 = document.getElementById("progEnabled");
-      if (pe0?.checked) {
-        pe0.checked = false;
-        pe0.dispatchEvent(new Event("change", { bubbles: true }));
-      }
       setVal("soloScaleType", "dorian");
       setVal("soloAlignHarmonyWithScale", true);
       setVal("harmonyBase", "deg1");
@@ -568,11 +558,6 @@ function applySoloScenePreset(key) {
     },
     static_pent_blues: () => {
       setVal("soloContextMode", "static_key");
-      const pe0 = document.getElementById("progEnabled");
-      if (pe0?.checked) {
-        pe0.checked = false;
-        pe0.dispatchEvent(new Event("change", { bubbles: true }));
-      }
       setVal("soloScaleType", "pent_minor");
       setVal("soloAlignHarmonyWithScale", true);
       setVal("harmonyBase", "deg1");
@@ -583,11 +568,6 @@ function applySoloScenePreset(key) {
     },
     static_bossa_line: () => {
       setVal("soloContextMode", "static_key");
-      const pe0 = document.getElementById("progEnabled");
-      if (pe0?.checked) {
-        pe0.checked = false;
-        pe0.dispatchEvent(new Event("change", { bubbles: true }));
-      }
       setVal("soloScaleType", "mixolydian");
       setVal("soloAlignHarmonyWithScale", true);
       setVal("harmonyBase", "deg1");
@@ -599,11 +579,6 @@ function applySoloScenePreset(key) {
     prog_pop_ivvi: () => {
       setVal("soloContextMode", "progression");
       progLoadPreset("I_V_vi_IV_pop");
-      const pe = document.getElementById("progEnabled");
-      if (pe && !pe.checked) {
-        pe.checked = true;
-        pe.dispatchEvent(new Event("change", { bubbles: true }));
-      }
       setVal("soloAlignHarmonyWithScale", false);
       setVal("harmonyStyle", "sustain");
       setVal("progHarmonyStyle", "strum_ballad");
@@ -614,11 +589,6 @@ function applySoloScenePreset(key) {
     prog_blues12: () => {
       setVal("soloContextMode", "progression");
       progLoadPreset("blues_12_major");
-      const pe = document.getElementById("progEnabled");
-      if (pe && !pe.checked) {
-        pe.checked = true;
-        pe.dispatchEvent(new Event("change", { bubbles: true }));
-      }
       setVal("soloScaleType", "mixolydian");
       setVal("soloAlignHarmonyWithScale", false);
       setVal("progHarmonyStyle", "strum_rock_8");
@@ -629,11 +599,6 @@ function applySoloScenePreset(key) {
     prog_iiV_I: () => {
       setVal("soloContextMode", "progression");
       progLoadPreset("ii_V_I_major");
-      const pe = document.getElementById("progEnabled");
-      if (pe && !pe.checked) {
-        pe.checked = true;
-        pe.dispatchEvent(new Event("change", { bubbles: true }));
-      }
       setVal("soloAlignHarmonyWithScale", false);
       setVal("progHarmonyStyle", "strum_charleston");
       setVal("harmonyStyle", "sustain");
@@ -643,11 +608,6 @@ function applySoloScenePreset(key) {
     },
     static_dictation_1231: () => {
       setVal("soloContextMode", "static_key");
-      const pe0 = document.getElementById("progEnabled");
-      if (pe0?.checked) {
-        pe0.checked = false;
-        pe0.dispatchEvent(new Event("change", { bubbles: true }));
-      }
       setVal("soloScaleType", "");
       setVal("scaleType", "major");
       setVal("soloAlignHarmonyWithScale", true);
@@ -659,11 +619,6 @@ function applySoloScenePreset(key) {
     },
     static_dictation_5321: () => {
       setVal("soloContextMode", "static_key");
-      const pe0 = document.getElementById("progEnabled");
-      if (pe0?.checked) {
-        pe0.checked = false;
-        pe0.dispatchEvent(new Event("change", { bubbles: true }));
-      }
       setVal("soloScaleType", "");
       setVal("scaleType", "major");
       setVal("soloAlignHarmonyWithScale", true);
@@ -675,11 +630,6 @@ function applySoloScenePreset(key) {
     },
     static_dictation_alberti: () => {
       setVal("soloContextMode", "static_key");
-      const pe0 = document.getElementById("progEnabled");
-      if (pe0?.checked) {
-        pe0.checked = false;
-        pe0.dispatchEvent(new Event("change", { bubbles: true }));
-      }
       setVal("soloScaleType", "");
       setVal("scaleType", "major");
       setVal("soloAlignHarmonyWithScale", true);
@@ -691,11 +641,6 @@ function applySoloScenePreset(key) {
     },
     static_dictation_turn: () => {
       setVal("soloContextMode", "static_key");
-      const pe0 = document.getElementById("progEnabled");
-      if (pe0?.checked) {
-        pe0.checked = false;
-        pe0.dispatchEvent(new Event("change", { bubbles: true }));
-      }
       setVal("soloScaleType", "dorian");
       setVal("scaleType", "dorian");
       setVal("soloAlignHarmonyWithScale", true);
@@ -1805,12 +1750,12 @@ function parseMidiStaffSpelling(midi, preferFl) {
   return { letter, octave, acc, name };
 }
 
-/** Etiqueta para partitura em convenção PT/BR (C4 científico aparece como C3). */
+/** Etiqueta da partitura em oitava científica (C4 = 60). */
 function notationLabelPt(midi, preferFl) {
   const pc = ((midi % 12) + 12) % 12;
   const pitch = pcToName(pc, preferFl);
   const octaveSci = Math.floor(midi / 12) - 1;
-  return `${pitch}${octaveSci - 1}`;
+  return `${pitch}${octaveSci}`;
 }
 
 /** Mantém a nota escrita no intervalo visual preservando a classe de altura. */

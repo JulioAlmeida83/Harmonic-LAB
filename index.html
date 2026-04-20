@@ -537,7 +537,7 @@
           <button
             type="button"
             class="btn btn-primary btn-compact js-solo-play"
-            title="Liga o solo (áudio em modo amostra). Com «Solo na tonalidade» não precisa da sequência; com «Seguir sequência» precisa de passos definidos."
+            title="Liga apenas o solo (áudio em modo amostra). Não ativa nem desativa a sequência."
             aria-label="Tocar solo sobre a sequência"
           >▶ Solo</button>
           <button
@@ -597,11 +597,12 @@
             <option value="progression">Seguir sequência (quando activa)</option>
           </select>
         </label>
-        <label class="field field-wide">
-          <span>Escala das frases (solo)</span>
+        <label class="field field-wide solo-flow-card solo-flow-card--scale">
+          <span>1) Escala das frases (vocabulário)</span>
           <select id="soloScaleType" title="Intervalos usados nas figuras de solo. Vazio = mesma escala que «Escala completa».">
             <option value="" selected>Igual à escala global («Escala completa»)</option>
           </select>
+          <small class="solo-flow-help">Define o conjunto de notas disponível para os padrões baseados em escala.</small>
         </label>
         <label class="field field-check">
           <input type="checkbox" id="soloAlignHarmonyWithScale" checked title="Harmonia estática (gra I…) calculada com a escala do solo em vez da escala de referência fixa" />
@@ -638,8 +639,8 @@
           <input type="checkbox" id="soloEnabled" />
           <span>Ativar solo</span>
         </label>
-        <label class="field">
-          <span>Padrão melódico</span>
+        <label class="field solo-flow-card solo-flow-card--pattern">
+          <span>2) Padrão melódico (fraseado)</span>
           <select id="soloPattern">
             <optgroup label="Arpejos e acorde">
               <option value="arp_up">Arpejo ascendente</option>
@@ -715,6 +716,7 @@
               <option value="chrom_crawl_down">Cromática curta a descer (raiz)</option>
             </optgroup>
           </select>
+          <small class="solo-flow-help">Aplica uma fórmula sobre a escala/acorde atuais para formar a frase.</small>
         </label>
         <label class="field">
           <span>Ritmo</span>

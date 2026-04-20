@@ -749,6 +749,25 @@ body.mode-simple .is-advanced {
   align-items: flex-end;
 }
 
+.solo-flow-card {
+  padding: 0.5rem 0.6rem 0.55rem;
+  border: 1px solid rgba(108, 156, 255, 0.28);
+  border-radius: 9px;
+  background: rgba(108, 156, 255, 0.06);
+}
+
+.solo-flow-card--pattern {
+  border-color: rgba(92, 225, 184, 0.3);
+  background: rgba(92, 225, 184, 0.06);
+}
+
+.solo-flow-help {
+  margin: 0.1rem 0 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.3;
+}
+
 .solo-sheet-print {
   display: none;
 }
