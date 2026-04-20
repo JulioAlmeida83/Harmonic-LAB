@@ -737,6 +737,83 @@ body.mode-simple .is-advanced {
   font-weight: 650;
 }
 
+.row-solo-print {
+  margin-top: 0.65rem;
+}
+
+.row-solo-combo-bank {
+  margin: 0.55rem 0 0.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.85rem;
+  align-items: flex-end;
+}
+
+.solo-sheet-print {
+  display: none;
+}
+
+.solo-sheet-print-wrap {
+  padding: 0.3in 0.35in;
+  color: #111;
+  background: #fff;
+}
+
+.solo-sheet-print-title {
+  margin: 0 0 0.2rem;
+  font-size: 18pt;
+}
+
+.solo-sheet-print-meta {
+  margin: 0 0 0.25in;
+  font-size: 10pt;
+  color: #333;
+}
+
+.solo-sheet-print-item {
+  break-inside: avoid;
+  margin: 0 0 0.18in;
+  padding-bottom: 0.12in;
+  border-bottom: 1px solid #ddd;
+}
+
+.solo-sheet-print-item-title {
+  margin: 0 0 0.06in;
+  font-size: 11pt;
+  color: #111;
+}
+
+.solo-sheet-staff-host {
+  background: #fff;
+  border-color: #d9d9d9;
+}
+
+.solo-sheet-staff-host .notation-live-svg {
+  max-width: 100%;
+}
+
+.solo-sheet-staff-host .notation-clef-g {
+  fill: #111;
+}
+
+@media print {
+  body.print-solo-sheet #app-shell {
+    display: none !important;
+  }
+
+  body.print-solo-sheet .solo-sheet-print {
+    display: block !important;
+  }
+
+  body.print-solo-sheet {
+    position: static;
+    inset: auto;
+    overflow: visible;
+    background: #fff;
+    color: #111;
+  }
+}
+
 .btn-header-audio {
   min-height: 2.35rem;
   padding: 0.42rem 0.8rem;

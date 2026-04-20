@@ -713,6 +713,82 @@ function applySoloScenePreset(key) {
   refreshSampleExecutionLoop();
 }
 
+const SOLO_COMBO_BANK_LS = "hl_solo_combo_bank_v1";
+
+function readSoloComboBank() {
+  try {
+    const raw = localStorage.getItem(SOLO_COMBO_BANK_LS);
+    if (!raw) return [];
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data)) return [];
+    return data.filter((x) => x && typeof x === "object" && typeof x.id === "string" && x.state && typeof x.state === "object");
+  } catch (_) {
+    return [];
+  }
+}
+
+function writeSoloComboBank(items) {
+  try {
+    localStorage.setItem(SOLO_COMBO_BANK_LS, JSON.stringify(items));
+  } catch (_) {
+    /* storage opcional */
+  }
+}
+
+function readCurrentSoloComboState() {
+  return {
+    tonic: document.getElementById("tonic")?.value ?? "C",
+    scaleType: document.getElementById("scaleType")?.value ?? "major",
+    soloContextMode: document.getElementById("soloContextMode")?.value ?? "static_key",
+    soloScaleType: document.getElementById("soloScaleType")?.value ?? "",
+    soloAlignHarmonyWithScale: !!document.getElementById("soloAlignHarmonyWithScale")?.checked,
+    soloAutoEnableHarmony: !!document.getElementById("soloAutoEnableHarmony")?.checked,
+    soloPattern: document.getElementById("soloPattern")?.value ?? "arp_up",
+    soloRhythm: document.getElementById("soloRhythm")?.value ?? "swing",
+    soloOctave: document.getElementById("soloOctave")?.value ?? "4",
+    harmonyBase: document.getElementById("harmonyBase")?.value ?? "deg1",
+    harmonyStyle: document.getElementById("harmonyStyle")?.value ?? "sustain",
+    progHarmonyStyle: document.getElementById("progHarmonyStyle")?.value ?? "sustain",
+    progEnabled: !!document.getElementById("progEnabled")?.checked,
+    progressionSteps: progReadSteps(),
+  };
+}
+
+function applySoloComboState(state) {
+  if (!state || typeof state !== "object") return;
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (!el || val === undefined || val === null) return;
+    if (el.type === "checkbox") el.checked = Boolean(val);
+    else el.value = String(val);
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  setVal("tonic", state.tonic);
+  setVal("scaleType", state.scaleType);
+  setVal("soloContextMode", state.soloContextMode);
+  setVal("soloScaleType", state.soloScaleType);
+  setVal("soloAlignHarmonyWithScale", state.soloAlignHarmonyWithScale);
+  setVal("soloAutoEnableHarmony", state.soloAutoEnableHarmony);
+  setVal("soloPattern", state.soloPattern);
+  setVal("soloRhythm", state.soloRhythm);
+  setVal("soloOctave", state.soloOctave);
+  setVal("harmonyBase", state.harmonyBase);
+  setVal("harmonyStyle", state.harmonyStyle);
+  setVal("progHarmonyStyle", state.progHarmonyStyle);
+  const pe = document.getElementById("progEnabled");
+  if (pe && typeof state.progEnabled === "boolean") {
+    pe.checked = state.progEnabled;
+    pe.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  if (Array.isArray(state.progressionSteps) && state.progressionSteps.length) {
+    progRenderEditor(state.progressionSteps);
+    progResolveFromUI();
+    progRefreshCifras();
+    progRenderStatus();
+  }
+  refreshSampleExecutionLoop();
+}
+
 /** Deslocamento em semitonos (múltiplos de 12 na UI) aplicado às notas de baixo. */
 function readHarmonyBassSemitoneOffset() {
   const v = Number(document.getElementById("harmonyBassOctave")?.value ?? -12);
@@ -1597,6 +1673,8 @@ let scaleLoopTimer = null;
 const scaleHighlightTimers = [];
 /** Timers de highlight do pentagrama melódico (nota ativa). */
 const melodyStaffHighlightTimers = [];
+/** Geração dos highlights melódicos para invalidar callbacks atrasados. */
+let melodyStaffHighlightGeneration = 0;
 /** Highlights da faixa de notas da sequência (sincronizados com o áudio). */
 const seqStripHighlightTimers = [];
 /** Highlights da faixa de notas da harmonia (por batida do loop de amostras). */
@@ -1735,12 +1813,16 @@ function notationLabelPt(midi, preferFl) {
   return `${pitch}${octaveSci - 1}`;
 }
 
-/** Mantém a nota escrita no intervalo visual sem inverter grave/agudo. */
+/** Mantém a nota escrita no intervalo visual preservando a classe de altura. */
 function wrapNotationMidiNearStaff(rawMidi) {
-  // Clamping monotónico: notas mais agudas nunca aparecem abaixo de notas graves.
-  // Evita o efeito de "dobrar oitava" visual que desrespeita a percepção de altura.
-  const m = clampMidi(rawMidi);
-  return Math.max(STAFF_VISUAL_MIDI_MIN, Math.min(STAFF_VISUAL_MIDI_MAX, m));
+  let m = clampMidi(rawMidi);
+  // Primeiro, puxa por oitavas para dentro da janela (evita "colar tudo em A2").
+  while (m < STAFF_VISUAL_MIDI_MIN) m += 12;
+  while (m > STAFF_VISUAL_MIDI_MAX) m -= 12;
+  // Se ainda ficou fora por uma janela impossível/degenerada, aplica clamp final.
+  if (m < STAFF_VISUAL_MIDI_MIN) return STAFF_VISUAL_MIDI_MIN;
+  if (m > STAFF_VISUAL_MIDI_MAX) return STAFF_VISUAL_MIDI_MAX;
+  return m;
 }
 
 const MAJOR_KEY_SIG_COUNT_BY_PC = {
@@ -2067,7 +2149,8 @@ function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
       const cMidi = uniqConcert[i];
       const wMidi = wrapNotationMidiNearStaff(concertToWrittenMidi(cMidi));
       const sp = parseMidiStaffSpelling(wMidi, pf);
-      const stStep = letterOctaveToStaffStepFromE4(sp.letter, sp.octave);
+      const stStepRaw = letterOctaveToStaffStepFromE4(sp.letter, sp.octave);
+      const stStep = Math.max(-4, Math.min(12, stStepRaw));
       const y = staffBottom0 - stStep * (lineGap / 2);
       let x = x0 + i * spread;
       for (const p of placed) {
@@ -2137,6 +2220,209 @@ function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
 
   svg.appendChild(gRoot);
   host.appendChild(svg);
+}
+
+function buildSoloCurrentCombinationPrintData() {
+  const tonicPc = currentTonicPc();
+  const rhythmId = effectiveSoloRhythmId();
+  const patternId = document.getElementById("soloPattern")?.value || "arp_up";
+  const soloOctUi = Number(document.getElementById("soloOctave")?.value ?? 4);
+  const beatSec = 1;
+  const windowBeats = 4;
+  const solved = resolveSoloChordAndScale(tonicPc);
+  const chord = solved?.chord || { intervals: [0, 4, 7, 11] };
+  const scaleIvals = solved?.scaleIvals || SCALE_TYPES.major.intervals;
+  const scaleKey = solved?.scaleKey || "major";
+  const { attacks, windowEnd } = buildSoloQuantizedTimeline(rhythmId, beatSec, windowBeats, 0);
+  const rel = generateSoloDegrees(patternId, chord.intervals, scaleIvals, 0, attacks.length);
+  const baseMidi = midiTonic(tonicPc, 4);
+  const notes = [];
+  for (let i = 0; i < attacks.length; i += 1) {
+    const midi = soloMidiToPlayableRange(baseMidi + (rel[i] ?? 0), tonicPc, soloOctUi);
+    notes.push({ midi, off: attacks[i].off, dur: attacks[i].dur });
+  }
+  return { tonicPc, scaleKey, patternId, rhythmId, notes, windowEnd };
+}
+
+function renderSoloTimedPrintStaff(host, notes, opts) {
+  const NS = LIVE_NOTATION_NS;
+  host.textContent = "";
+  const pf = preferFlats();
+  const tr = readWrittenTransposeSemitones();
+  const lineGap = 14;
+  const svgW = 940;
+  const staffLeft = 48;
+  const staffRight = svgW - 12;
+  const staffBottom0 = 108;
+  const staffTop = staffBottom0 - 4 * lineGap;
+  const svgH = 188;
+  const innerLo = staffLeft + 38;
+  const innerHi = staffRight - 10;
+  const beatCount = 4;
+  const windowEnd = Math.max(0.001, Number(opts.windowEnd) || 4);
+  const noteFill = "rgba(150, 210, 255, 0.32)";
+  const noteStroke = "rgba(190, 230, 255, 0.95)";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${svgW} ${svgH}`);
+  svg.setAttribute("class", "notation-live-svg");
+  svg.setAttribute("aria-hidden", "true");
+  const g = document.createElementNS(NS, "g");
+
+  for (let k = 0; k < 5; k += 1) {
+    const ly = staffBottom0 - k * lineGap;
+    const line = document.createElementNS(NS, "line");
+    line.setAttribute("x1", String(staffLeft));
+    line.setAttribute("x2", String(staffRight));
+    line.setAttribute("y1", String(ly));
+    line.setAttribute("y2", String(ly));
+    line.setAttribute("stroke", "rgba(255,255,255,0.24)");
+    line.setAttribute("stroke-width", "1");
+    g.appendChild(line);
+  }
+
+  const clef = document.createElementNS(NS, "text");
+  clef.setAttribute("x", "8");
+  clef.setAttribute("y", String(staffBottom0 - 28));
+  clef.setAttribute("font-size", "42");
+  clef.setAttribute("class", "notation-clef-g");
+  clef.textContent = "\uD834\uDD1E";
+  g.appendChild(clef);
+
+  for (let j = 1; j < beatCount; j += 1) {
+    const x = innerLo + ((innerHi - innerLo) * j) / beatCount;
+    const bl = document.createElementNS(NS, "line");
+    bl.setAttribute("x1", String(x));
+    bl.setAttribute("x2", String(x));
+    bl.setAttribute("y1", String(staffTop - 4));
+    bl.setAttribute("y2", String(staffBottom0 + 4));
+    bl.setAttribute("stroke", "rgba(255,255,255,0.28)");
+    bl.setAttribute("stroke-width", "1");
+    g.appendChild(bl);
+  }
+
+  const title = document.createElementNS(NS, "text");
+  title.setAttribute("x", "6");
+  title.setAttribute("y", "16");
+  title.setAttribute("fill", "#9aa3b2");
+  title.setAttribute("font-size", "10.5");
+  title.setAttribute("font-weight", "600");
+  title.textContent = opts.titleLine || "";
+  g.appendChild(title);
+
+  const drawLedgerLines = (x, step) => {
+    const drawAtStep = (s) => {
+      const y = staffBottom0 - s * (lineGap / 2);
+      const lx = document.createElementNS(NS, "line");
+      lx.setAttribute("x1", String(x - 16));
+      lx.setAttribute("x2", String(x + 18));
+      lx.setAttribute("y1", String(y));
+      lx.setAttribute("y2", String(y));
+      lx.setAttribute("stroke", "rgba(255,255,255,0.34)");
+      lx.setAttribute("stroke-width", "1");
+      g.appendChild(lx);
+    };
+    if (step <= -2) for (let s = -2; s >= step; s -= 2) drawAtStep(s);
+    else if (step >= 10) for (let s = 10; s <= step; s += 2) drawAtStep(s);
+  };
+
+  for (const note of notes) {
+    const cMidi = Number(note.midi);
+    if (!Number.isFinite(cMidi)) continue;
+    const wMidi = wrapNotationMidiNearStaff(concertToWrittenMidi(cMidi));
+    const sp = parseMidiStaffSpelling(wMidi, pf);
+    const stStepRaw = letterOctaveToStaffStepFromE4(sp.letter, sp.octave);
+    const stStep = Math.max(-4, Math.min(12, stStepRaw));
+    const y = staffBottom0 - stStep * (lineGap / 2);
+    const x = innerLo + ((innerHi - innerLo) * Math.max(0, Math.min(windowEnd, note.off || 0))) / windowEnd;
+    drawLedgerLines(x, stStep);
+    if (sp.acc) {
+      const ax = document.createElementNS(NS, "text");
+      ax.setAttribute("x", String(x - 18));
+      ax.setAttribute("y", String(y + 5));
+      ax.setAttribute("font-size", "16");
+      ax.setAttribute("fill", sp.acc === "♯" ? "#72d572" : "#ffd35a");
+      ax.setAttribute("font-family", "Georgia, 'Times New Roman', serif");
+      ax.textContent = sp.acc;
+      g.appendChild(ax);
+    }
+    const head = document.createElementNS(NS, "ellipse");
+    head.setAttribute("cx", String(x));
+    head.setAttribute("cy", String(y));
+    head.setAttribute("rx", "7");
+    head.setAttribute("ry", "5");
+    head.setAttribute("fill", noteFill);
+    head.setAttribute("stroke", noteStroke);
+    head.setAttribute("stroke-width", "1.2");
+    g.appendChild(head);
+    const stem = document.createElementNS(NS, "line");
+    const stemDown = stStep >= 3;
+    if (stemDown) {
+      stem.setAttribute("x1", String(x + 4.5));
+      stem.setAttribute("x2", String(x + 4.5));
+      stem.setAttribute("y1", String(y + 2));
+      stem.setAttribute("y2", String(y + 28));
+    } else {
+      stem.setAttribute("x1", String(x - 4.5));
+      stem.setAttribute("x2", String(x - 4.5));
+      stem.setAttribute("y1", String(y - 2));
+      stem.setAttribute("y2", String(y - 28));
+    }
+    stem.setAttribute("stroke", noteStroke);
+    stem.setAttribute("stroke-width", "1.25");
+    stem.setAttribute("stroke-linecap", "round");
+    g.appendChild(stem);
+    const durLabel = document.createElementNS(NS, "text");
+    durLabel.setAttribute("x", String(x));
+    durLabel.setAttribute("y", String(y + 38));
+    durLabel.setAttribute("fill", "#c5cad6");
+    durLabel.setAttribute("font-size", "8");
+    durLabel.setAttribute("text-anchor", "middle");
+    const wLab = notationLabelPt(wMidi, pf);
+    const cLab = tr !== 0 ? ` (${midiNoteLabel(cMidi, pf, "pitch")})` : "";
+    durLabel.textContent = `${wLab}${cLab}`;
+    g.appendChild(durLabel);
+  }
+
+  svg.appendChild(g);
+  host.appendChild(svg);
+}
+
+function renderCurrentSoloCombinationSheetForPrint() {
+  const host = document.getElementById("soloSheetPrintArea");
+  const patternSel = document.getElementById("soloPattern");
+  const rhythmSel = document.getElementById("soloRhythm");
+  if (!host || !patternSel || !rhythmSel) return;
+  const d = buildSoloCurrentCombinationPrintData();
+  const patternLabel = patternSel.options[patternSel.selectedIndex]?.textContent?.trim() || d.patternId;
+  const rhythmLabel = rhythmSel.options[rhythmSel.selectedIndex]?.textContent?.trim() || d.rhythmId;
+  const wrap = document.createElement("div");
+  wrap.className = "solo-sheet-print-wrap";
+  const title = document.createElement("h1");
+  title.className = "solo-sheet-print-title";
+  title.textContent = "Harmonic Lab — Partitura da combinação selecionada";
+  wrap.appendChild(title);
+  const meta = document.createElement("p");
+  meta.className = "solo-sheet-print-meta";
+  meta.textContent =
+    `Tônica: ${pcToName(d.tonicPc, preferFlats())}. Escala: ${SCALE_TYPES[d.scaleKey]?.label || d.scaleKey}. ` +
+    `Padrão: ${patternLabel}. Ritmo: ${rhythmLabel}. Guarde como PDF no diálogo de impressão.`;
+  wrap.appendChild(meta);
+  const block = document.createElement("article");
+  block.className = "solo-sheet-print-item";
+  const h = document.createElement("h2");
+  h.className = "solo-sheet-print-item-title";
+  h.textContent = `${patternLabel} + ${rhythmLabel}`;
+  block.appendChild(h);
+  const staffHost = document.createElement("div");
+  staffHost.className = "notation-staff-host solo-sheet-staff-host";
+  block.appendChild(staffHost);
+  renderSoloTimedPrintStaff(staffHost, d.notes, {
+    windowEnd: d.windowEnd,
+    titleLine: "Frase de 4 tempos com posicionamento rítmico real",
+  });
+  wrap.appendChild(block);
+  host.textContent = "";
+  host.appendChild(wrap);
 }
 
 /**
@@ -2494,6 +2780,7 @@ function stopSampleExecutionLoop() {
   lastSoloChordSig = "";
   lastHarmHearStripSig = "";
   clearHarmonyHearVisuals();
+  melodyStaffHighlightGeneration += 1;
   for (const t of melodyStaffHighlightTimers) clearTimeout(t);
   melodyStaffHighlightTimers.length = 0;
   liveNotationActiveMelodyKeys = new Set();
@@ -4425,12 +4712,15 @@ function rebuildLiveNotationFourBarColumns(barStartBeat) {
 
 function clearMelodyNotationCols() {
   liveNotationStaffMelodyFourCols = [[], [], [], []];
+  melodyStaffHighlightGeneration += 1;
   for (const t of melodyStaffHighlightTimers) clearTimeout(t);
   melodyStaffHighlightTimers.length = 0;
   liveNotationActiveMelodyKeys = new Set();
 }
 
 function scheduleMelodyStaffHighlights(midis, offsetsSec, dursSec, beatSec, t0CtxSec, tokenGuard) {
+  melodyStaffHighlightGeneration += 1;
+  const runGeneration = melodyStaffHighlightGeneration;
   for (const t of melodyStaffHighlightTimers) clearTimeout(t);
   melodyStaffHighlightTimers.length = 0;
   liveNotationActiveMelodyKeys = new Set();
@@ -4457,6 +4747,7 @@ function scheduleMelodyStaffHighlights(midis, offsetsSec, dursSec, beatSec, t0Ct
     const endMs = Math.max(startMs + 20, Math.round((t0CtxSec + offsetsSec[i] + dursSec[i] - ctxNow) * 1000));
     melodyStaffHighlightTimers.push(
       setTimeout(() => {
+        if (runGeneration !== melodyStaffHighlightGeneration) return;
         if (typeof tokenGuard === "function" && !tokenGuard()) return;
         liveNotationActiveMelodyKeys.add(key);
         renderLiveNotationStaff();
@@ -4464,6 +4755,7 @@ function scheduleMelodyStaffHighlights(midis, offsetsSec, dursSec, beatSec, t0Ct
     );
     melodyStaffHighlightTimers.push(
       setTimeout(() => {
+        if (runGeneration !== melodyStaffHighlightGeneration) return;
         if (typeof tokenGuard === "function" && !tokenGuard()) return;
         liveNotationActiveMelodyKeys.delete(key);
         renderLiveNotationStaff();
@@ -5535,6 +5827,18 @@ function wireGlobalControls() {
     });
   }
 
+  const btnPrintSoloSheets = document.getElementById("btnPrintSoloSheets");
+  if (btnPrintSoloSheets) {
+    btnPrintSoloSheets.addEventListener("click", () => {
+      renderCurrentSoloCombinationSheetForPrint();
+      document.body.classList.add("print-solo-sheet");
+      window.print();
+      setTimeout(() => {
+        document.body.classList.remove("print-solo-sheet");
+      }, 200);
+    });
+  }
+
   // Modo simples/avançado — esconde campos .is-advanced no modo simples.
   const btnMode = document.getElementById("btnMode");
   if (btnMode) {
@@ -5761,6 +6065,83 @@ function wireGlobalControls() {
         applySoloScenePreset(k);
       }
     });
+  }
+
+  const soloComboSelect = document.getElementById("soloComboBankSelect");
+  const soloComboName = document.getElementById("soloComboBankName");
+  const btnSoloComboSave = document.getElementById("btnSoloComboSave");
+  const btnSoloComboLoad = document.getElementById("btnSoloComboLoad");
+  const btnSoloComboDelete = document.getElementById("btnSoloComboDelete");
+
+  const refreshSoloComboBankUi = () => {
+    if (!soloComboSelect) return;
+    const current = soloComboSelect.value;
+    const items = readSoloComboBank().sort((a, b) => (a.name || "").localeCompare(b.name || "", "pt"));
+    soloComboSelect.innerHTML = "";
+    const first = document.createElement("option");
+    first.value = "";
+    first.textContent = "— escolher combinação guardada —";
+    soloComboSelect.appendChild(first);
+    for (const item of items) {
+      const o = document.createElement("option");
+      o.value = item.id;
+      o.textContent = item.name || item.id;
+      soloComboSelect.appendChild(o);
+    }
+    if ([...soloComboSelect.options].some((o) => o.value === current)) soloComboSelect.value = current;
+  };
+
+  if (btnSoloComboSave) {
+    btnSoloComboSave.addEventListener("click", () => {
+      const name = (soloComboName?.value || "").trim();
+      if (!name) {
+        alert("Dê um nome para a combinação antes de guardar.");
+        return;
+      }
+      const items = readSoloComboBank();
+      const id = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || `combo-${Date.now()}`;
+      const state = readCurrentSoloComboState();
+      const next = items.filter((x) => x.id !== id);
+      next.push({ id, name, state, updatedAt: Date.now() });
+      writeSoloComboBank(next);
+      refreshSoloComboBankUi();
+      if (soloComboSelect) soloComboSelect.value = id;
+    });
+  }
+
+  if (btnSoloComboLoad) {
+    btnSoloComboLoad.addEventListener("click", () => {
+      const id = soloComboSelect?.value;
+      if (!id) return;
+      const item = readSoloComboBank().find((x) => x.id === id);
+      if (!item) return;
+      applySoloComboState(item.state);
+      if (soloComboName) soloComboName.value = item.name || "";
+    });
+  }
+
+  if (btnSoloComboDelete) {
+    btnSoloComboDelete.addEventListener("click", () => {
+      const id = soloComboSelect?.value;
+      if (!id) return;
+      const items = readSoloComboBank();
+      const item = items.find((x) => x.id === id);
+      if (!item) return;
+      if (!confirm(`Apagar a combinação "${item.name || id}"?`)) return;
+      writeSoloComboBank(items.filter((x) => x.id !== id));
+      if (soloComboName) soloComboName.value = "";
+      refreshSoloComboBankUi();
+    });
+  }
+
+  if (soloComboSelect) {
+    soloComboSelect.addEventListener("change", () => {
+      const id = soloComboSelect.value;
+      if (!id) return;
+      const item = readSoloComboBank().find((x) => x.id === id);
+      if (item && soloComboName) soloComboName.value = item.name || "";
+    });
+    refreshSoloComboBankUi();
   }
 
   const masterGainEl = document.getElementById("masterGain");

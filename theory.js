@@ -2156,6 +2156,41 @@ function soloScaleDegreePatSigned(pat, _ci, si, idx, n) {
   return r;
 }
 
+function chordToneFromIntervals(ci, degree) {
+  if (!Array.isArray(ci) || !ci.length) return 0;
+  if (degree === "root") return ci[0] ?? 0;
+  if (degree === "third") return ci.find((x) => x === 3 || x === 4) ?? ci[1] ?? 4;
+  if (degree === "fifth") return ci.find((x) => x === 7 || x === 5) ?? ci[2] ?? 7;
+  if (degree === "seventh") return ci.find((x) => x === 10 || x === 11) ?? ci[Math.min(3, ci.length - 1)] ?? 10;
+  if (degree === "ninth") return (ci[0] ?? 0) + 14;
+  return ci[0] ?? 0;
+}
+
+function sequenceFromChordDegrees(ci, degreeNames) {
+  return degreeNames.map((deg) => chordToneFromIntervals(ci, deg));
+}
+
+function runLinearSequence(seq, idx, n, descending = false) {
+  const src = descending ? [...seq].reverse() : seq;
+  const out = [];
+  if (!src.length) return out;
+  for (let i = 0; i < n; i++) {
+    const k = idx + i;
+    const pos = k % src.length;
+    const oct = descending ? -Math.floor(k / src.length) : Math.floor(k / src.length);
+    out.push(src[pos] + 12 * oct);
+  }
+  return out;
+}
+
+function runPingPongSequence(seq, idx, n) {
+  const cycle = [...seq, ...[...seq].reverse().slice(1, -1)];
+  if (!cycle.length) return Array(n).fill(0);
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(cycle[(idx + i) % cycle.length]);
+  return out;
+}
+
 const SOLO_PATTERNS = {
   /** Arpejo ascendente (chord tones, ciclo por oitavas). */
   arp_up(ci, _si, idx, n) {
@@ -2321,6 +2356,81 @@ const SOLO_PATTERNS = {
       r.push(ci[degIdx % ci.length] + 12 * oct);
     }
     return r;
+  },
+  /** Arpejo ascendente (iniciante): R–3–5. */
+  arp_up_basic(ci, _si, idx, n) {
+    const seq = sequenceFromChordDegrees(ci, ["root", "third", "fifth"]);
+    return runLinearSequence(seq, idx, n, false);
+  },
+  /** Arpejo ascendente (intermediário): R–3–5–7. */
+  arp_up_intermediate(ci, _si, idx, n) {
+    const seq = sequenceFromChordDegrees(ci, ["root", "third", "fifth", "seventh"]);
+    return runLinearSequence(seq, idx, n, false);
+  },
+  /** Arpejo ascendente (avançado): R–3–5–7–9. */
+  arp_up_advanced(ci, _si, idx, n) {
+    const seq = sequenceFromChordDegrees(ci, ["root", "third", "fifth", "seventh", "ninth"]);
+    return runLinearSequence(seq, idx, n, false);
+  },
+  /** Arpejo descendente (iniciante): 5–3–1. */
+  arp_down_basic(ci, _si, idx, n) {
+    const seq = sequenceFromChordDegrees(ci, ["root", "third", "fifth"]);
+    return runLinearSequence(seq, idx, n, true);
+  },
+  /** Arpejo descendente (intermediário): 7–5–3–1. */
+  arp_down_intermediate(ci, _si, idx, n) {
+    const seq = sequenceFromChordDegrees(ci, ["root", "third", "fifth", "seventh"]);
+    return runLinearSequence(seq, idx, n, true);
+  },
+  /** Arpejo descendente (avançado): 9–7–5–3–1. */
+  arp_down_advanced(ci, _si, idx, n) {
+    const seq = sequenceFromChordDegrees(ci, ["root", "third", "fifth", "seventh", "ninth"]);
+    return runLinearSequence(seq, idx, n, true);
+  },
+  /** Arpejo sobe-desce (iniciante): R–3–5. */
+  arp_updown_basic(ci, _si, idx, n) {
+    const seq = sequenceFromChordDegrees(ci, ["root", "third", "fifth"]);
+    return runPingPongSequence(seq, idx, n);
+  },
+  /** Arpejo sobe-desce (intermediário): R–3–5–7. */
+  arp_updown_intermediate(ci, _si, idx, n) {
+    const seq = sequenceFromChordDegrees(ci, ["root", "third", "fifth", "seventh"]);
+    return runPingPongSequence(seq, idx, n);
+  },
+  /** Arpejo sobe-desce (avançado): R–3–5–7–9. */
+  arp_updown_advanced(ci, _si, idx, n) {
+    const seq = sequenceFromChordDegrees(ci, ["root", "third", "fifth", "seventh", "ninth"]);
+    return runPingPongSequence(seq, idx, n);
+  },
+  /** Arpejo aberto (iniciante): R–5–3. */
+  arp_spread_basic(ci, _si, idx, n) {
+    const seq = sequenceFromChordDegrees(ci, ["root", "fifth", "third"]);
+    return runLinearSequence(seq, idx, n, false);
+  },
+  /** Arpejo aberto (intermediário): R–5–3–7. */
+  arp_spread_intermediate(ci, _si, idx, n) {
+    const seq = sequenceFromChordDegrees(ci, ["root", "fifth", "third", "seventh"]);
+    return runLinearSequence(seq, idx, n, false);
+  },
+  /** Arpejo aberto (avançado): R–5–3–7–9. */
+  arp_spread_advanced(ci, _si, idx, n) {
+    const seq = sequenceFromChordDegrees(ci, ["root", "fifth", "third", "seventh", "ninth"]);
+    return runLinearSequence(seq, idx, n, false);
+  },
+  /** 1–3–5–7 em níveis (iniciante): triádico. */
+  chord_degrees_1357_basic(ci, _si, idx, n) {
+    const seq = sequenceFromChordDegrees(ci, ["root", "third", "fifth"]);
+    return runLinearSequence(seq, idx, n, false);
+  },
+  /** 1–3–5–7 em níveis (intermediário): tétrade. */
+  chord_degrees_1357_intermediate(ci, _si, idx, n) {
+    const seq = sequenceFromChordDegrees(ci, ["root", "third", "fifth", "seventh"]);
+    return runLinearSequence(seq, idx, n, false);
+  },
+  /** 1–3–5–7 em níveis (avançado): tétrade + 9ª. */
+  chord_degrees_1357_advanced(ci, _si, idx, n) {
+    const seq = sequenceFromChordDegrees(ci, ["root", "third", "fifth", "seventh", "ninth"]);
+    return runLinearSequence(seq, idx, n, false);
   },
   /** Alterna 3ª e 7ª do acorde (guide tones). */
   guide_37(ci, _si, idx, n) {

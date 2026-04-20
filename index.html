@@ -612,6 +612,27 @@
           <span>Ligar harmonia (I) ao tocar solo</span>
         </label>
       </div>
+      <div class="row row-solo-combo-bank">
+        <label class="field field-wide">
+          <span>Banco de combinações (personalizado)</span>
+          <select id="soloComboBankSelect" title="Combinações guardadas por você (além dos presets).">
+            <option value="">— escolher combinação guardada —</option>
+          </select>
+        </label>
+        <label class="field field-wide">
+          <span>Nome da combinação</span>
+          <input
+            type="text"
+            id="soloComboBankName"
+            maxlength="64"
+            placeholder="Ex.: Arpejo iniciante em swing"
+            title="Nome para guardar a combinação atual de solo."
+          />
+        </label>
+        <button type="button" id="btnSoloComboSave" class="btn btn-compact" title="Guarda a combinação atual no banco personalizado.">Guardar combinação</button>
+        <button type="button" id="btnSoloComboLoad" class="btn btn-compact" title="Carrega a combinação selecionada no banco.">Carregar combinação</button>
+        <button type="button" id="btnSoloComboDelete" class="btn btn-outline-stop btn-compact" title="Apaga a combinação selecionada do banco.">Apagar combinação</button>
+      </div>
       <div class="row row-solo-top">
         <label class="field field-check">
           <input type="checkbox" id="soloEnabled" />
@@ -626,6 +647,21 @@
               <option value="arp_updown">Arpejo sobe/desce</option>
               <option value="arp_spread">Arpejo aberto (R–5–3–7)</option>
               <option value="chord_degrees_1357">Graus 1–3–5–7 do acorde</option>
+              <option value="arp_up_basic">Arpejo asc. • Iniciante (R–3–5)</option>
+              <option value="arp_up_intermediate">Arpejo asc. • Intermediário (R–3–5–7)</option>
+              <option value="arp_up_advanced">Arpejo asc. • Avançado (R–3–5–7–9)</option>
+              <option value="arp_down_basic">Arpejo desc. • Iniciante (5–3–1)</option>
+              <option value="arp_down_intermediate">Arpejo desc. • Intermediário (7–5–3–1)</option>
+              <option value="arp_down_advanced">Arpejo desc. • Avançado (9–7–5–3–1)</option>
+              <option value="arp_updown_basic">Sobe/desce • Iniciante (R–3–5)</option>
+              <option value="arp_updown_intermediate">Sobe/desce • Intermediário (R–3–5–7)</option>
+              <option value="arp_updown_advanced">Sobe/desce • Avançado (R–3–5–7–9)</option>
+              <option value="arp_spread_basic">Arpejo aberto • Iniciante (R–5–3)</option>
+              <option value="arp_spread_intermediate">Arpejo aberto • Intermediário (R–5–3–7)</option>
+              <option value="arp_spread_advanced">Arpejo aberto • Avançado (R–5–3–7–9)</option>
+              <option value="chord_degrees_1357_basic">1–3–5 • Iniciante</option>
+              <option value="chord_degrees_1357_intermediate">1–3–5–7 • Intermediário</option>
+              <option value="chord_degrees_1357_advanced">1–3–5–7–9 • Avançado</option>
               <option value="triad_burst">Tríade em ciclo</option>
               <option value="power_fifth">Power (raiz–quinta–quinta+8va)</option>
             </optgroup>
@@ -733,6 +769,14 @@
         </label>
       </div>
       <div id="soloHearLine" class="solo-hear-line" aria-live="off"></div>
+      <div class="row row-solo-print">
+        <button
+          type="button"
+          id="btnPrintSoloSheets"
+          class="btn btn-compact"
+          title="Gera uma folha com partitura-resumo de todos os padrões de solo e abre impressão (Guardar como PDF)."
+        >Imprimir partituras das sequências (PDF)</button>
+      </div>
     </div>
 
     <div class="prog-actions prog-actions-top" role="toolbar" aria-label="Editor da sequência — acções rápidas">
@@ -1056,6 +1100,8 @@
       </div>
     </form>
   </dialog>
+
+  <section id="soloSheetPrintArea" class="solo-sheet-print" aria-hidden="true"></section>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
   <script src="sound-bank.js"></script>
