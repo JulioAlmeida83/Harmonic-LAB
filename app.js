@@ -1635,6 +1635,8 @@ let audioUserEnabled = false;
 let syncAudioRaf = 0;
 /** Timer do loop por amostras. Um só `setTimeout` encadeado evita drift cumulativo. */
 let sampleStepTimer = null;
+/** Geração do loop de amostras (invalida callbacks antigos). */
+let sampleLoopGeneration = 0;
 let sampleTonicNextAt = 0;
 let sampleHarmonyArpIndex = 0;
 let sampleHarmonyBeatIndex = 0; // avança em TODAS as batidas (não só arpejo)
@@ -2879,6 +2881,7 @@ async function preloadSamplerBank() {
 }
 
 function stopSampleExecutionLoop() {
+  sampleLoopGeneration += 1;
   if (sampleStepTimer) {
     clearTimeout(sampleStepTimer);
     sampleStepTimer = null;
@@ -3511,6 +3514,7 @@ const HARMONY_EXEC_PATTERNS = {
 
 function refreshSampleExecutionLoop() {
   stopSampleExecutionLoop();
+  const loopGen = sampleLoopGeneration;
   if (!audioUserEnabled || !audio.ctx || audio.ctx.state !== "running") return;
   const soundMode = document.getElementById("soundMode")?.value ?? "synth";
   if (soundMode !== "sample" || !audio.instrumentSampler || !audio.scaleSampleBus) return;
@@ -3534,6 +3538,7 @@ function refreshSampleExecutionLoop() {
   ]);
 
   const step = () => {
+    if (loopGen !== sampleLoopGeneration) return;
     if (!audioUserEnabled || !audio.ctx || audio.ctx.state !== "running") return;
     // Export em modo render: verifica se já atingimos N ciclos e pára a
     // gravação. Não trava o step — o áudio continua a correr normalmente.
@@ -3863,8 +3868,10 @@ function refreshSampleExecutionLoop() {
   // reinícios quando o utilizador ajusta o andamento).
   let nextAt = (audio.ctx?.currentTime ?? 0) + 60 / currentBpm();
   const scheduleNext = () => {
+    if (loopGen !== sampleLoopGeneration) return;
     if (!audioUserEnabled || !audio.ctx || audio.ctx.state !== "running") return;
     step();
+    if (loopGen !== sampleLoopGeneration) return;
     // Avança a sequência de acordes (uma batida por tick). Se a escala do step
     // mudar e `applyScale` estiver ativo, progTickBeat dispara onContextChange
     // via o evento change no select #scaleType.
@@ -3875,6 +3882,7 @@ function refreshSampleExecutionLoop() {
     sampleStepTimer = setTimeout(scheduleNext, waitMs);
   };
   step();
+  if (loopGen !== sampleLoopGeneration) return;
   sampleStepTimer = setTimeout(scheduleNext, Math.max(20, (60 / currentBpm()) * 1000));
 }
 
