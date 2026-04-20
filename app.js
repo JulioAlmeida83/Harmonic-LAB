@@ -2425,22 +2425,38 @@ function buildSoloEventsForContext(opts) {
   const rootPc = ((Number(chord.rootPc) % 12) + 12) % 12;
   const { attacks } = buildSoloQuantizedTimeline(rhythmId, beatSec, windowBeats, startGlobalBeat);
   if (!attacks.length) return { notes: [], nextPatternIndex: patternStartIndex };
+  // Padrões didáticos de graus do acorde (1–3–5 / 1–3–5–7 / 1–3–5–7–9):
+  // tocam uma única célula por janela quantizada, sem repetir ao longo do
+  // ritmo (ex.: swing com vários ataques).
+  const patternCellLen = (() => {
+    switch (patternId) {
+      case "chord_degrees_1357_basic":
+        return 3;
+      case "chord_degrees_1357_intermediate":
+        return 4;
+      case "chord_degrees_1357_advanced":
+        return 5;
+      default:
+        return null;
+    }
+  })();
+  const eventCount = patternCellLen != null ? Math.min(attacks.length, patternCellLen) : attacks.length;
   const degrees = generateSoloDegrees(
     patternId,
     chord.intervals || [0, 4, 7, 11],
     opts?.scaleIvals || SCALE_TYPES.major.intervals,
     patternStartIndex,
-    attacks.length,
+    eventCount,
   );
   const baseMidi = midiTonic(rootPc, 4);
   const notes = [];
-  for (let i = 0; i < attacks.length; i += 1) {
+  for (let i = 0; i < eventCount; i += 1) {
     const semitones = degrees[i] ?? 0;
     const rawMidi = baseMidi + semitones;
     const midi = soloMidiToPlayableRange(rawMidi, rootPc, soloOct);
     notes.push({ midi, off: offBase + attacks[i].off, dur: attacks[i].dur });
   }
-  return { notes, nextPatternIndex: patternStartIndex + attacks.length };
+  return { notes, nextPatternIndex: patternStartIndex + eventCount };
 }
 
 function renderSoloTimedPrintStaff(host, notes, opts) {
