@@ -401,6 +401,79 @@ function effectiveSoloScaleKey() {
   return document.getElementById("scaleType")?.value || "major";
 }
 
+function isPentBluesScaleKey(scaleKey) {
+  return scaleKey === "pent_major" || scaleKey === "pent_minor" || scaleKey === "blues" || scaleKey === "blues_major";
+}
+
+function isMinorLikeScaleKey(scaleKey) {
+  return (
+    scaleKey === "natural_minor" ||
+    scaleKey === "dorian" ||
+    scaleKey === "phrygian" ||
+    scaleKey === "locrian" ||
+    scaleKey === "harmonic_minor" ||
+    scaleKey === "melodic_minor_asc" ||
+    scaleKey === "melodic_minor_desc" ||
+    scaleKey === "pent_minor" ||
+    scaleKey === "blues"
+  );
+}
+
+function soloPatternFamily(patternId) {
+  if (patternId === "pent" || patternId === "pent_blue") return "pent_blues";
+  return "generic";
+}
+
+function suggestSoloScaleForPattern(patternId, fallbackScaleKey) {
+  if (soloPatternFamily(patternId) !== "pent_blues") return null;
+  return isMinorLikeScaleKey(fallbackScaleKey) ? "pent_minor" : "pent_major";
+}
+
+let soloPatternVocabSyncLock = false;
+
+function syncSoloPatternVocabularyCompatibility(source = "ui") {
+  if (soloPatternVocabSyncLock) return;
+  soloPatternVocabSyncLock = true;
+  try {
+    const patternSel = document.getElementById("soloPattern");
+    const soloScaleSel = document.getElementById("soloScaleType");
+    const globalScaleSel = document.getElementById("scaleType");
+    const hint = document.getElementById("soloPatternVocabHint");
+    if (!patternSel || !soloScaleSel || !globalScaleSel || !hint) return;
+
+    const patternId = patternSel.value || "arp_up";
+    const effectiveScale = effectiveSoloScaleKey();
+    const fam = soloPatternFamily(patternId);
+    let adjusted = false;
+
+    if (source === "pattern" && fam === "pent_blues" && !isPentBluesScaleKey(effectiveScale)) {
+      const suggested = suggestSoloScaleForPattern(patternId, effectiveScale) || "pent_minor";
+      const exists = [...soloScaleSel.options].some((o) => o.value === suggested);
+      if (exists) {
+        soloScaleSel.value = suggested;
+        soloScaleSel.dispatchEvent(new Event("change", { bubbles: true }));
+        adjusted = true;
+      }
+    }
+
+    const scaleAfter = effectiveSoloScaleKey();
+    const scaleLabel = SCALE_TYPES[scaleAfter]?.label || scaleAfter;
+    if (fam === "pent_blues") {
+      if (isPentBluesScaleKey(scaleAfter)) {
+        hint.textContent = adjusted
+          ? `Vocabulário ajustado automaticamente para ${scaleLabel} para casar com o padrão selecionado.`
+          : `Padrão e vocabulário alinhados: ${scaleLabel}.`;
+      } else {
+        hint.textContent = `Padrão pentatônico/blues com vocabulário ${scaleLabel}: pode soar híbrido fora do idioma principal.`;
+      }
+    } else {
+      hint.textContent = `Vocabulário ativo: ${scaleLabel}. Padrão melódico contextualizado nessa linguagem.`;
+    }
+  } finally {
+    soloPatternVocabSyncLock = false;
+  }
+}
+
 /**
  * Intervalos para harmonia estática e baixo quando «Base harmónica na escala do solo»
  * está activo — alinha graus I–VII à escala escolhida para o solo.
@@ -705,6 +778,7 @@ function applySoloScenePreset(key) {
   if (fn) fn();
   populateSoloScaleSelect();
   syncSoloScaleOptionLabelsFromGlobal();
+  syncSoloPatternVocabularyCompatibility("scene");
   refreshSampleExecutionLoop();
 }
 
@@ -5674,8 +5748,8 @@ function progRenderStatus() {
   }
 }
 
-function progPopulatePresets() {
-  const sel = document.getElementById("progPreset");
+function progPopulatePresetsForSelect(selectId) {
+  const sel = document.getElementById(selectId);
   if (!sel) return;
   // Mantém a primeira opção "— escolher —" e remove tudo o resto (optgroups
   // eventualmente criados em render anterior + options sem grupo).
@@ -5711,6 +5785,11 @@ function progPopulatePresets() {
     }
     sel.appendChild(og);
   }
+}
+
+function progPopulatePresets() {
+  progPopulatePresetsForSelect("progPreset");
+  progPopulatePresetsForSelect("cycleProgPreset");
 }
 
 function progLoadPreset(key) {
@@ -5802,6 +5881,7 @@ function progSyntheticIvalsForChord(chord) {
 function wireProgressionControls() {
   const enabled = document.getElementById("progEnabled");
   const preset = document.getElementById("progPreset");
+  const cyclePreset = document.getElementById("cycleProgPreset");
   const auto = document.getElementById("progAutoScale");
   const applyScale = document.getElementById("progApplyScale");
   const addBtns = document.querySelectorAll(".js-prog-add");
@@ -5839,8 +5919,27 @@ function wireProgressionControls() {
     const key = preset.value;
     if (key) {
       progLoadPreset(key);
+      if (cyclePreset && cyclePreset.value !== key) cyclePreset.value = key;
     }
   });
+
+  if (cyclePreset) {
+    cyclePreset.addEventListener("change", () => {
+      const key = cyclePreset.value;
+      if (!key) return;
+      if (!enabled.checked) {
+        enabled.checked = true;
+        enabled.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      progLoadPreset(key);
+      if (preset && preset.value !== key) preset.value = key;
+      const soloCtx = document.getElementById("soloContextMode");
+      if (soloCtx && soloCtx.value !== "progression") {
+        soloCtx.value = "progression";
+        soloCtx.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+  }
 
   const onProgAdd = () => {
     const editor = document.getElementById("progStepsEditor");
@@ -6297,6 +6396,25 @@ function wireGlobalControls() {
     const el = document.getElementById(id);
     if (el) el.addEventListener("change", onContextChange);
   });
+
+  const soloPatternEl = document.getElementById("soloPattern");
+  if (soloPatternEl) {
+    soloPatternEl.addEventListener("change", () => {
+      syncSoloPatternVocabularyCompatibility("pattern");
+    });
+  }
+  const soloScaleEl = document.getElementById("soloScaleType");
+  if (soloScaleEl) {
+    soloScaleEl.addEventListener("change", () => {
+      syncSoloPatternVocabularyCompatibility("scale");
+    });
+  }
+  const globalScaleEl = document.getElementById("scaleType");
+  if (globalScaleEl) {
+    globalScaleEl.addEventListener("change", () => {
+      syncSoloPatternVocabularyCompatibility("scale");
+    });
+  }
 
   const btnCycleStep = document.getElementById("btnCycleStep");
   if (btnCycleStep) {
@@ -6862,6 +6980,7 @@ function wireGlobalControls() {
   syncSoloTransportUi();
   syncHarmonyToggleUi();
   updateSampleControlsEnabled();
+  syncSoloPatternVocabularyCompatibility("init");
 }
 
 const UI_OUTLINE_ICON_PATHS = {

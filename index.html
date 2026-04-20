@@ -211,6 +211,12 @@
           Avançar
         </button>
       </div>
+      <label class="field field-compact" title="Escolhe a progressão para estudar enquanto percorre o ciclo tonal.">
+        <span>Progressão no ciclo</span>
+        <select id="cycleProgPreset">
+          <option value="" selected>— escolher —</option>
+        </select>
+      </label>
       <label class="field field-compact">
         <span>BPM</span>
         <input type="number" id="globalBpm" min="40" max="220" value="96" />
@@ -734,6 +740,7 @@
             </optgroup>
           </select>
           <small class="solo-flow-help">Aplica uma fórmula sobre a escala/acorde atuais para formar a frase.</small>
+          <small class="solo-flow-help" id="soloPatternVocabHint" aria-live="polite"></small>
         </label>
         <label class="field">
           <span>Ritmo</span>
