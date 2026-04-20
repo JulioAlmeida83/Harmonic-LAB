@@ -10,6 +10,12 @@
   --slot-w: 112px;
   --font: "Segoe UI", system-ui, sans-serif;
   --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --c-accent-primary: #6c9cff;
+  --c-accent-harm: #5fc0ff;
+  --c-accent-solo: #5ce1b8;
+  --c-accent-warm: #ffd37a;
+  --c-accent-danger: #ff8a8a;
+  --c-accent-violet: #b499ff;
   /* Informa ao browser que os controles nativos (select dropdown, scrollbars,
      caret de input number) devem ser renderizados em tema escuro. Sem isto,
      Chrome/Edge abrem o painel do <select> com fundo claro + texto branco. */
@@ -237,6 +243,19 @@ body.mode-simple .is-advanced {
     border-color 0.12s ease,
     background 0.12s ease,
     box-shadow 0.12s ease;
+}
+
+.harm-hear-pill .pill-note-written,
+.dash-solo-pill .pill-note-written {
+  font-weight: 750;
+  letter-spacing: 0.01em;
+  color: #fff6c8;
+}
+
+.harm-hear-pill .pill-note-concert,
+.dash-solo-pill .pill-note-concert {
+  font-size: 0.86em;
+  color: rgba(214, 224, 242, 0.85);
 }
 
 .harm-hear-pill.is-current {
@@ -779,15 +798,95 @@ body.mode-simple .is-advanced {
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
-  opacity: 0.92;
+  opacity: 0.95;
 }
 
 .ui-ico-outline--subtle {
   width: 0.82rem;
   height: 0.82rem;
   margin-right: 0.34rem;
-  opacity: 0.55;
+  opacity: 0.62;
   stroke-width: 1.7;
+}
+
+/* Cor base de ícones em labels secundárias */
+.field > span .ui-ico-outline,
+.fx-slider > span .ui-ico-outline,
+.notation-staff-block-label .ui-ico-outline,
+.playhead-dash-footnote .ui-ico-outline {
+  color: rgba(184, 198, 226, 0.82);
+}
+
+/* Ícones por seção / contexto */
+h1 .ui-ico-outline {
+  color: var(--c-accent-violet);
+}
+
+.playhead-dash-title .ui-ico-outline {
+  color: var(--c-accent-primary);
+}
+
+.notation-panel-title .ui-ico-outline {
+  color: var(--c-accent-warm);
+}
+
+.playhead-dash-card--chord .playhead-dash-label .ui-ico-outline {
+  color: var(--c-accent-violet);
+}
+
+.playhead-dash-card--harm .playhead-dash-label .ui-ico-outline {
+  color: var(--c-accent-harm);
+}
+
+.playhead-dash-card--solo .playhead-dash-label .ui-ico-outline {
+  color: var(--c-accent-solo);
+}
+
+/* Botões com ícones mais personalizados (cor por ação) */
+#btnAudio .ui-ico-outline,
+.js-scale-play .ui-ico-outline {
+  color: var(--c-accent-primary);
+}
+
+.js-solo-play .ui-ico-outline,
+#btnTonicSound .ui-ico-outline {
+  color: var(--c-accent-solo);
+}
+
+.js-scale-stop .ui-ico-outline,
+.js-solo-stop .ui-ico-outline,
+#btnMuteAll .ui-ico-outline,
+#btnSoloComboDelete .ui-ico-outline {
+  color: var(--c-accent-danger);
+}
+
+#btnExport .ui-ico-outline,
+#btnSoloComboSave .ui-ico-outline {
+  color: var(--c-accent-warm);
+}
+
+#btnPrintSoloSheets .ui-ico-outline,
+#btnSoloComboLoad .ui-ico-outline,
+#btnMode .ui-ico-outline {
+  color: var(--c-accent-violet);
+}
+
+/* Pills com menos "peso visual" e cor contextual mais clara */
+.harm-hear-pill,
+.dash-solo-pill,
+.scale-seq-pill {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+  border-color: rgba(165, 186, 226, 0.45);
+}
+
+#dashHarmStrip .harm-hear-pill {
+  border-color: rgba(95, 192, 255, 0.58);
+  background: linear-gradient(180deg, rgba(95, 192, 255, 0.16), rgba(95, 192, 255, 0.08));
+}
+
+#dashSoloStrip .dash-solo-pill {
+  border-color: rgba(92, 225, 184, 0.52);
+  background: linear-gradient(180deg, rgba(92, 225, 184, 0.14), rgba(92, 225, 184, 0.07));
 }
 
 .btn .ui-ico-outline,

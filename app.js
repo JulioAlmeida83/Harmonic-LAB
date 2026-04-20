@@ -76,10 +76,30 @@ function writtenTranspositionModeLabel() {
 function dualConcertWrittenLabel(concertMidi, preferFl) {
   const concert = midiNoteLabel(concertMidi, preferFl, "pitch");
   const tr = readWrittenTransposeSemitones();
-  if (!tr) return `Concert ${concert}`;
+  if (!tr) return concert;
   const written = writtenMidiNoteLabel(concertMidi, preferFl, "pitch");
-  const mode = writtenTranspositionModeLabel();
-  return `Concert ${concert} · ${mode} ${written}`;
+  return `${written} (${concert})`;
+}
+
+function setDualLabelOnPill(el, concertMidi, preferFl) {
+  if (!el) return;
+  const concert = midiNoteLabel(concertMidi, preferFl, "pitch");
+  const tr = readWrittenTransposeSemitones();
+  if (!tr) {
+    el.textContent = concert;
+    return;
+  }
+  const written = writtenMidiNoteLabel(concertMidi, preferFl, "pitch");
+  el.innerHTML = "";
+  const primary = document.createElement("span");
+  primary.className = "pill-note-written";
+  primary.textContent = written;
+  const secondary = document.createElement("span");
+  secondary.className = "pill-note-concert";
+  secondary.textContent = `(${concert})`;
+  el.appendChild(primary);
+  el.appendChild(document.createTextNode(" "));
+  el.appendChild(secondary);
 }
 
 /** Mediana MIDI de um conjunto (referência para cor de registo). */
@@ -1683,7 +1703,7 @@ function fillHarmonyHearStrip(host, midis, extraClasses) {
     pill.className = ["harm-hear-pill", extraClasses].filter(Boolean).join(" ");
     pill.setAttribute("role", "listitem");
     pill.dataset.midi = String(m);
-    pill.textContent = dualConcertWrittenLabel(m, pf);
+    setDualLabelOnPill(pill, m, pf);
     const reg = midiRegisterClass(m, ref);
     if (reg) pill.classList.add(reg);
     host.appendChild(pill);
@@ -1715,7 +1735,7 @@ function renderDashSoloPills(soloMidis) {
       pill.className = "dash-solo-pill";
       pill.setAttribute("role", "listitem");
       pill.dataset.midi = String(m);
-      pill.textContent = dualConcertWrittenLabel(m, pf);
+      setDualLabelOnPill(pill, m, pf);
       const reg = midiRegisterClass(m, ref);
       if (reg) pill.classList.add(reg);
       host.appendChild(pill);
@@ -1730,7 +1750,7 @@ function refreshLiveNotePillLabelsFromDatasets() {
     .forEach((el) => {
       const midi = Number(el.dataset.midi);
       if (!Number.isFinite(midi)) return;
-      el.textContent = dualConcertWrittenLabel(midi, pf);
+      setDualLabelOnPill(el, midi, pf);
     });
 }
 
@@ -2425,6 +2445,11 @@ function renderCurrentSoloCombinationSheetForPrint() {
   const rhythmSel = document.getElementById("soloRhythm");
   if (!host || !patternSel || !rhythmSel) return;
   const d = buildSoloCurrentCombinationPrintData();
+  if (!Array.isArray(d.notes) || d.notes.length === 0) {
+    // Fallback defensivo: se não houver notas geradas por combinação,
+    // tenta capturar o estado visível do pentagrama ao vivo.
+    return renderLiveSoloSnapshotSheetForPrint();
+  }
   const patternLabel = patternSel.options[patternSel.selectedIndex]?.textContent?.trim() || d.patternId;
   const rhythmLabel = rhythmSel.options[rhythmSel.selectedIndex]?.textContent?.trim() || d.rhythmId;
   const wrap = document.createElement("div");
@@ -2461,6 +2486,7 @@ function renderCurrentSoloCombinationSheetForPrint() {
   wrap.appendChild(block);
   host.textContent = "";
   host.appendChild(wrap);
+  return true;
 }
 
 function hasAnyNotesInFourCols(cols) {
@@ -5916,11 +5942,9 @@ function wireGlobalControls() {
   const btnPrintSoloSheets = document.getElementById("btnPrintSoloSheets");
   if (btnPrintSoloSheets) {
     btnPrintSoloSheets.addEventListener("click", () => {
-      // Prioriza o que está a soar/visível na pauta agora; fallback para combinação selecionada.
-      const printedLiveSnapshot = renderLiveSoloSnapshotSheetForPrint();
-      if (!printedLiveSnapshot) {
-        renderCurrentSoloCombinationSheetForPrint();
-      }
+      // Prioriza sempre a geração pela combinação atual (inclui sequência ativa).
+      // Snapshot ao vivo fica só como fallback interno, se necessário.
+      renderCurrentSoloCombinationSheetForPrint();
       document.body.classList.add("print-solo-sheet");
       window.print();
       setTimeout(() => {
