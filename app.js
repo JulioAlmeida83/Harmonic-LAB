@@ -389,9 +389,9 @@ function updateScaleStarLabels() {
 
 /** Com «harmonia desligada», baixo pode usar tríade em I como referência. */
 function effectiveHarmonyIdForBassSamples(harmId) {
-  if (harmId !== "off") return harmId;
-  if (document.getElementById("bassWithHarmonyOff")?.checked) return "deg1";
-  return "off";
+  // Comportamento estrito: o baixo segue sempre a referência harmónica ativa.
+  // Se a harmonia estiver desligada, o baixo também fica desligado.
+  return harmId !== "off" ? harmId : "off";
 }
 
 /** Escala usada nas frases de solo (select próprio ou a global «Escala completa»). */
@@ -478,13 +478,19 @@ function readPlaybackMidiCeiling() {
  * O chão só actua se `#playbackMidiFloor` existir e for > 0.
  */
 function clampPlaybackMidiToRange(midi) {
-  let m = clampMidi(midi);
+  let m = Math.round(Number(midi));
+  if (!Number.isFinite(m)) return 60;
   const hi = readPlaybackMidiCeiling();
+  // Preserva classe de altura: primeiro traz para o domínio MIDI válido.
+  while (m < 0) m += 12;
+  while (m > 127) m -= 12;
   while (m > hi) m -= 12;
   const floorEl = document.getElementById("playbackMidiFloor");
   const loRaw = floorEl ? Number(floorEl.value) : 0;
   const lo = Number.isFinite(loRaw) && loRaw > 0 ? Math.max(12, Math.min(84, Math.round(loRaw))) : null;
   if (lo != null) {
+    // Guarda de segurança para configurações invertidas no UI.
+    if (lo > hi) return wrapMidiToRange(m, hi, lo);
     while (m < lo) m += 12;
     while (m > hi) m -= 12;
   }
@@ -2442,6 +2448,8 @@ function renderSoloTimedPrintStaff(host, notes, opts) {
     return "1/16";
   };
 
+  const labelStride = notes.length > 18 ? 2 : 1;
+  let noteIdx = 0;
   for (const note of notes) {
     const cMidi = Number(note.midi);
     if (!Number.isFinite(cMidi)) continue;
@@ -2511,15 +2519,19 @@ function renderSoloTimedPrintStaff(host, notes, opts) {
     rTick.setAttribute("stroke", "rgba(150, 210, 255, 0.92)");
     rTick.setAttribute("stroke-width", "1.4");
     g.appendChild(rTick);
-    const durLabel = document.createElementNS(NS, "text");
-    durLabel.setAttribute("x", String(x));
-    durLabel.setAttribute("y", String(y + 38));
-    durLabel.setAttribute("fill", "#c5cad6");
-    durLabel.setAttribute("font-size", "8");
-    durLabel.setAttribute("text-anchor", "middle");
-    const wLab = notationLabelPt(wMidi, pf);
-    durLabel.textContent = `${wLab} · ${rhythmToken(dur)}`;
-    g.appendChild(durLabel);
+    // Em passagens densas, reduzir o número de rótulos evita sobreposição.
+    if (noteIdx % labelStride === 0) {
+      const durLabel = document.createElementNS(NS, "text");
+      durLabel.setAttribute("x", String(x));
+      durLabel.setAttribute("y", String(y + 38));
+      durLabel.setAttribute("fill", "#c5cad6");
+      durLabel.setAttribute("font-size", "8");
+      durLabel.setAttribute("text-anchor", "middle");
+      const wLab = notationLabelPt(wMidi, pf);
+      durLabel.textContent = wLab;
+      g.appendChild(durLabel);
+    }
+    noteIdx += 1;
   }
 
   svg.appendChild(g);
@@ -3668,7 +3680,7 @@ function refreshSampleExecutionLoop() {
     "strum_ballad",
   ]);
 
-  const step = () => {
+  const step = (tickAtSec) => {
     if (loopGen !== sampleLoopGeneration) return;
     if (!audioUserEnabled || !audio.ctx || audio.ctx.state !== "running") return;
     // Export em modo render: verifica se já atingimos N ciclos e pára a
@@ -3680,7 +3692,10 @@ function refreshSampleExecutionLoop() {
     const tcp = currentTonicPc();
     const ivals = currentIvals();
     const baseOct = slotsPlaybackBaseOct();
-    const t = audio.ctx.currentTime + 0.01;
+    // Todas as camadas (harmonia/baixo/slots/solo) devem partilhar o mesmo
+    // instante-base de agendamento para evitar flutuação relativa.
+    const tNow = audio.ctx.currentTime;
+    const t = Number.isFinite(tickAtSec) ? Math.max(tNow + 0.006, tickAtSec) : tNow + 0.01;
     const bpm = currentBpm();
     const beat = 60 / bpm;
     const style = document.getElementById("playStyle")?.value || "sustain";
@@ -3859,8 +3874,16 @@ function refreshSampleExecutionLoop() {
         const normB = globalThis.HLChordNormalizer
           ? HLChordNormalizer.normalizeSingleNote(bMidiPattern, currentBassBankId())
           : { midi: bMidiPattern, gainScale: 1, styleOverride: undefined };
-        // A oitava escolhida pelo utilizador deve prevalecer sobre a normalização.
-        const bMidi = clampPlaybackMidiToRange((normB.midi ?? bMidiPattern) + bassOff);
+        // A oitava escolhida pelo utilizador deve prevalecer, mas sem sair da
+        // faixa útil do instrumento (evita pitch-shift extremo em pizzicato).
+        const bassBankId = currentBassBankId();
+        const bassProfile = globalThis.HLChordNormalizer?.getProfile?.(bassBankId);
+        const brLo = bassProfile?.range?.[0];
+        const brHi = bassProfile?.range?.[1];
+        const bMidiShifted = (normB.midi ?? bMidiPattern) + bassOff;
+        const bMidi = Number.isFinite(brLo) && Number.isFinite(brHi) && brLo < brHi
+          ? clampPlaybackMidiToRange(wrapMidiToRange(bMidiShifted, brLo, brHi))
+          : clampPlaybackMidiToRange(bMidiShifted);
         const bassVol = Number(document.getElementById("harmonyBassVol")?.value ?? 44) / 100;
         const bPeak = Math.max(0.04, Math.min(0.2, bassVol * 0.17 * (normB.gainScale ?? 1)));
         const hStyleRaw0 = effectiveHarmonyExecStyle();
@@ -4011,26 +4034,25 @@ function refreshSampleExecutionLoop() {
     sampleHarmonyBeatIndex += 1;
   };
 
-  // Agendamento auto-encadeado: lê o BPM corrente em cada iteração (sem drift e sem
-  // reinícios quando o utilizador ajusta o andamento).
-  let nextAt = (audio.ctx?.currentTime ?? 0) + 60 / currentBpm();
+  // Agendamento auto-encadeado em relógio absoluto do AudioContext.
+  // `nextAt` é a próxima batida-alvo comum para TODAS as camadas.
+  let nextAt = (audio.ctx?.currentTime ?? 0) + 0.06;
   const scheduleNext = () => {
     if (loopGen !== sampleLoopGeneration) return;
     if (!audioUserEnabled || !audio.ctx || audio.ctx.state !== "running") return;
-    step();
+    const now = audio.ctx.currentTime;
+    const tickAt = Math.max(nextAt, now + 0.008);
+    step(tickAt);
     if (loopGen !== sampleLoopGeneration) return;
     // Avança a sequência de acordes (uma batida por tick). Se a escala do step
     // mudar e `applyScale` estiver ativo, progTickBeat dispara onContextChange
     // via o evento change no select #scaleType.
     progTickBeat();
-    nextAt += 60 / currentBpm();
-    const now = audio.ctx.currentTime;
+    nextAt = tickAt + 60 / currentBpm();
     const waitMs = Math.max(20, (nextAt - now) * 1000);
     sampleStepTimer = setTimeout(scheduleNext, waitMs);
   };
-  step();
-  if (loopGen !== sampleLoopGeneration) return;
-  sampleStepTimer = setTimeout(scheduleNext, Math.max(20, (60 / currentBpm()) * 1000));
+  scheduleNext();
 }
 
 function updateSampleControlsEnabled() {
@@ -4935,7 +4957,15 @@ function predictedExecMidisRestForBeat(virtualBeat, anchorBeat, bassPatAtAnchor,
       const normB = globalThis.HLChordNormalizer
         ? HLChordNormalizer.normalizeSingleNote(bMidiPattern, currentBassBankId())
         : { midi: bMidiPattern, gainScale: 1, styleOverride: undefined };
-      midis.add(clampPlaybackMidiToRange((normB.midi ?? bMidiPattern) + bassOff));
+      const bassBankId = currentBassBankId();
+      const bassProfile = globalThis.HLChordNormalizer?.getProfile?.(bassBankId);
+      const brLo = bassProfile?.range?.[0];
+      const brHi = bassProfile?.range?.[1];
+      const bMidiShifted = (normB.midi ?? bMidiPattern) + bassOff;
+      const bMidi = Number.isFinite(brLo) && Number.isFinite(brHi) && brLo < brHi
+        ? clampPlaybackMidiToRange(wrapMidiToRange(bMidiShifted, brLo, brHi))
+        : clampPlaybackMidiToRange(bMidiShifted);
+      midis.add(bMidi);
     }
   }
 
