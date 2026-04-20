@@ -2242,54 +2242,63 @@ function buildSoloCurrentCombinationPrintData() {
   const startBarIdx = Math.floor(globalBeatStart / beatsPerBar);
   const notes = [];
   let patternCursor = 0;
+  let lastSig = "";
+  let firstScaleKey = scaleKey;
+
+  const resolvePrintBarSoloContext = (barOffset) => {
+    if (progActive) {
+      const at = stepAtBar(progState.resolved, startBarIdx + barOffset);
+      const st = at?.step;
+      if (st?.chord) {
+        const c = st.chord;
+        const rootPc = ((c.rootPc % 12) + 12) % 12;
+        // Mantém paridade com o motor ao vivo: em progressão, a escala vem de pickParentScaleForChord.
+        const picked = pickParentScaleForChord(c, tonicPc);
+        const k = picked?.key || "major";
+        return {
+          chord: c,
+          rootPc,
+          scaleIvals: SCALE_TYPES[k]?.intervals || SCALE_TYPES.major.intervals,
+          scaleKey: k,
+          fromProgression: true,
+        };
+      }
+    }
+    const rootPc = typeof chord?.rootPc === "number" ? ((chord.rootPc % 12) + 12) % 12 : tonicPc;
+    return { chord, rootPc, scaleIvals, scaleKey, fromProgression: false };
+  };
 
   for (let bar = 0; bar < barsToPrint; bar += 1) {
     const barStart = bar * beatsPerBar * beatSec;
-    let barChord = chord;
-    let barScaleIvals = scaleIvals;
-    let barRootPc = tonicPc;
-    if (progActive) {
-      const at = stepAtBar(progState.resolved, startBarIdx + bar);
-      const st = at?.step;
-      if (st?.chord) {
-        barChord = st.chord;
-        barRootPc = ((st.chord.rootPc % 12) + 12) % 12;
-      }
-      if (st?.scale && SCALE_TYPES[st.scale]?.intervals) {
-        barScaleIvals = SCALE_TYPES[st.scale].intervals;
-      }
-    } else if (typeof barChord?.rootPc === "number") {
-      barRootPc = ((barChord.rootPc % 12) + 12) % 12;
+    const ctxBar = resolvePrintBarSoloContext(bar);
+    if (bar === 0) firstScaleKey = ctxBar.scaleKey || firstScaleKey;
+    const sig = `${ctxBar.fromProgression ? "P" : "S"}|${ctxBar.chord?.rootPc}|${(ctxBar.chord?.intervals || []).join(",")}|${ctxBar.scaleKey}`;
+    if (sig !== lastSig) {
+      patternCursor = 0;
+      lastSig = sig;
     }
-
-    const barAttacks = [];
-    for (let b = 0; b < beatsPerBar; b += 1) {
-      const bib = (globalBeatStart + bar * beatsPerBar + b) % beatsPerBar;
-      const { offsets, durs } = soloRhythmOffsets(rhythmId, beatSec, bib);
-      for (let i = 0; i < offsets.length; i += 1) {
-        barAttacks.push({
-          off: barStart + b * beatSec + offsets[i],
-          dur: durs[i],
-        });
-      }
-    }
-    const rel = generateSoloDegrees(
+    const seg = buildSoloEventsForContext({
+      chord: ctxBar.chord,
+      scaleIvals: ctxBar.scaleIvals,
+      scaleKey: ctxBar.scaleKey,
+      fromProgression: ctxBar.fromProgression,
       patternId,
-      barChord?.intervals || chord.intervals || [0, 4, 7, 11],
-      barScaleIvals,
-      patternCursor,
-      barAttacks.length,
-    );
-    patternCursor += barAttacks.length;
-    const baseMidi = midiTonic(barRootPc, 4);
-    for (let i = 0; i < barAttacks.length; i += 1) {
-      const midi = soloMidiToPlayableRange(baseMidi + (rel[i] ?? 0), barRootPc, soloOctUi);
-      notes.push({ midi, off: barAttacks[i].off, dur: barAttacks[i].dur });
+      rhythmId,
+      soloOct: soloOctUi,
+      beatSec,
+      startGlobalBeat: globalBeatStart + bar * beatsPerBar,
+      windowBeats: beatsPerBar,
+      patternStartIndex: patternCursor,
+      offBase: barStart,
+    });
+    patternCursor = seg.nextPatternIndex;
+    for (const ev of seg.notes) {
+      notes.push(ev);
     }
   }
   return {
     tonicPc,
-    scaleKey,
+    scaleKey: firstScaleKey,
     patternId,
     rhythmId,
     notes,
@@ -2297,6 +2306,40 @@ function buildSoloCurrentCombinationPrintData() {
     beatCount: windowBeats,
     usesProgression: progActive,
   };
+}
+
+function buildSoloEventsForContext(opts) {
+  const chord = opts?.chord;
+  if (!chord || !Array.isArray(chord.intervals) || chord.rootPc == null) {
+    return { notes: [], nextPatternIndex: Number(opts?.patternStartIndex) || 0 };
+  }
+  const beatSec = Math.max(0.01, Number(opts?.beatSec) || 1);
+  const startGlobalBeat = Math.max(0, Math.floor(Number(opts?.startGlobalBeat) || 0));
+  const windowBeats = Math.max(1, Math.floor(Number(opts?.windowBeats) || PROG_BEATS_PER_BAR));
+  const patternId = opts?.patternId || "arp_up";
+  const rhythmId = opts?.rhythmId || effectiveSoloRhythmId();
+  const soloOct = Number(opts?.soloOct ?? 4);
+  const patternStartIndex = Math.max(0, Number(opts?.patternStartIndex) || 0);
+  const offBase = Number(opts?.offBase) || 0;
+  const rootPc = ((Number(chord.rootPc) % 12) + 12) % 12;
+  const { attacks } = buildSoloQuantizedTimeline(rhythmId, beatSec, windowBeats, startGlobalBeat);
+  if (!attacks.length) return { notes: [], nextPatternIndex: patternStartIndex };
+  const degrees = generateSoloDegrees(
+    patternId,
+    chord.intervals || [0, 4, 7, 11],
+    opts?.scaleIvals || SCALE_TYPES.major.intervals,
+    patternStartIndex,
+    attacks.length,
+  );
+  const baseMidi = midiTonic(rootPc, 4);
+  const notes = [];
+  for (let i = 0; i < attacks.length; i += 1) {
+    const semitones = degrees[i] ?? 0;
+    const rawMidi = baseMidi + semitones;
+    const midi = soloMidiToPlayableRange(rawMidi, rootPc, soloOct);
+    notes.push({ midi, off: offBase + attacks[i].off, dur: attacks[i].dur });
+  }
+  return { notes, nextPatternIndex: patternStartIndex + attacks.length };
 }
 
 function renderSoloTimedPrintStaff(host, notes, opts) {
@@ -3813,19 +3856,33 @@ function refreshSampleExecutionLoop() {
         const startGlobalBeat = ctxSolo.fromProgression ? progState.beatCounter : sampleHarmonyBeatIndex;
 
         if (soloIsFirstBeatOfQuantizeWindow(ctxSolo)) {
-          const { attacks } = buildSoloQuantizedTimeline(soloRhythm, beat, windowBeats, startGlobalBeat);
-          if (attacks.length > 0) {
-            const degrees = generateSoloDegrees(soloPattern, chord.intervals, scaleIvals, soloPatIndex, attacks.length);
-            soloPatIndex += attacks.length;
+          const soloEvents = buildSoloEventsForContext({
+            chord,
+            scaleIvals,
+            scaleKey: ctxSolo.scaleKey,
+            fromProgression: ctxSolo.fromProgression,
+            patternId: soloPattern,
+            rhythmId: soloRhythm,
+            soloOct,
+            beatSec: beat,
+            startGlobalBeat,
+            windowBeats,
+            patternStartIndex: soloPatIndex,
+            offBase: 0,
+          });
+          if (soloEvents.notes.length > 0) {
+            soloPatIndex = soloEvents.nextPatternIndex;
             const peak = Math.max(0.04, Math.min(0.2, soloVol * 0.18));
             const pfSolo = preferFlats();
             const soloMidisPlayed = [];
-            for (let i = 0; i < degrees.length; i += 1) {
-              const semitones = degrees[i];
-              const rawMidi = 12 * (soloOct + 1) + chord.rootPc + semitones;
-              const midi = qExec(soloMidiToPlayableRange(rawMidi, chord.rootPc, soloOct));
+            const soloOffs = [];
+            const soloDurs = [];
+            for (const ev of soloEvents.notes) {
+              const midi = qExec(ev.midi);
               soloMidisPlayed.push(midi);
-              audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t + attacks[i].off, peak, attacks[i].dur);
+              soloOffs.push(ev.off);
+              soloDurs.push(ev.dur);
+              audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t + ev.off, peak, ev.dur);
             }
             if (soloHear) {
               const wLabel = windowBeats > PROG_BEATS_PER_BAR ? `${windowBeats / PROG_BEATS_PER_BAR} comp.` : "1 comp.";
@@ -3834,12 +3891,12 @@ function refreshSampleExecutionLoop() {
                 ? `Solo (frase em ${wLabel}, quantizada ao acorde): ${soloPitchLine}`
                 : "";
             }
-            setMelodyNotationFromTimedNotes(soloMidisPlayed, attacks.map((a) => a.off), beat);
+            setMelodyNotationFromTimedNotes(soloMidisPlayed, soloOffs, beat);
             renderLiveNotationStaff();
             scheduleMelodyStaffHighlights(
               soloMidisPlayed,
-              attacks.map((a) => a.off),
-              attacks.map((a) => a.dur),
+              soloOffs,
+              soloDurs,
               beat,
               t,
               () => audioUserEnabled,
@@ -5952,7 +6009,11 @@ function wireGlobalControls() {
     btnPrintSoloSheets.addEventListener("click", () => {
       // Prioriza sempre a geração pela combinação atual (inclui sequência ativa).
       // Snapshot ao vivo fica só como fallback interno, se necessário.
-      renderCurrentSoloCombinationSheetForPrint();
+      const ok = !!renderCurrentSoloCombinationSheetForPrint();
+      if (!ok) {
+        window.alert("Sem notas para imprimir na combinação atual. Toque uma frase ou ajuste padrão/ritmo/contexto.");
+        return;
+      }
       document.body.classList.add("print-solo-sheet");
       window.print();
       setTimeout(() => {
