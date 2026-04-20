@@ -63,6 +63,25 @@ function writtenMidiNoteLabel(concertMidi, preferFl, mode = "pitch") {
   return midiNoteLabel(concertToWrittenMidi(concertMidi), preferFl, mode);
 }
 
+function writtenTranspositionModeLabel() {
+  const tr = readWrittenTransposeSemitones();
+  if (tr === 2) return "Bb";
+  if (tr === 3) return "Eb";
+  if (tr === 7) return "F";
+  if (tr === 0) return "Concert";
+  return "Written";
+}
+
+/** Rótulo compacto para UI ao vivo: sempre Concert + escrita ativa. */
+function dualConcertWrittenLabel(concertMidi, preferFl) {
+  const concert = midiNoteLabel(concertMidi, preferFl, "pitch");
+  const tr = readWrittenTransposeSemitones();
+  if (!tr) return `Concert ${concert}`;
+  const written = writtenMidiNoteLabel(concertMidi, preferFl, "pitch");
+  const mode = writtenTranspositionModeLabel();
+  return `Concert ${concert} · ${mode} ${written}`;
+}
+
 /** Mediana MIDI de um conjunto (referência para cor de registo). */
 function medianMidi(midis) {
   if (!midis.length) return 60;
@@ -1664,7 +1683,7 @@ function fillHarmonyHearStrip(host, midis, extraClasses) {
     pill.className = ["harm-hear-pill", extraClasses].filter(Boolean).join(" ");
     pill.setAttribute("role", "listitem");
     pill.dataset.midi = String(m);
-    pill.textContent = writtenMidiNoteLabel(m, pf, "pitch");
+    pill.textContent = dualConcertWrittenLabel(m, pf);
     const reg = midiRegisterClass(m, ref);
     if (reg) pill.classList.add(reg);
     host.appendChild(pill);
@@ -1696,12 +1715,23 @@ function renderDashSoloPills(soloMidis) {
       pill.className = "dash-solo-pill";
       pill.setAttribute("role", "listitem");
       pill.dataset.midi = String(m);
-      pill.textContent = writtenMidiNoteLabel(m, pf, "pitch");
+      pill.textContent = dualConcertWrittenLabel(m, pf);
       const reg = midiRegisterClass(m, ref);
       if (reg) pill.classList.add(reg);
       host.appendChild(pill);
     }
   }
+}
+
+function refreshLiveNotePillLabelsFromDatasets() {
+  const pf = preferFlats();
+  document
+    .querySelectorAll("#harmHearStrip .harm-hear-pill, #dashHarmStrip .harm-hear-pill, #dashSoloStrip .dash-solo-pill")
+    .forEach((el) => {
+      const midi = Number(el.dataset.midi);
+      if (!Number.isFinite(midi)) return;
+      el.textContent = dualConcertWrittenLabel(midi, pf);
+    });
 }
 
 const LIVE_NOTATION_NS = "http://www.w3.org/2000/svg";
@@ -2177,20 +2207,74 @@ function buildSoloCurrentCombinationPrintData() {
   const patternId = document.getElementById("soloPattern")?.value || "arp_up";
   const soloOctUi = Number(document.getElementById("soloOctave")?.value ?? 4);
   const beatSec = 1;
-  const windowBeats = 4;
+  const barsToPrint = 4;
+  const beatsPerBar = PROG_BEATS_PER_BAR;
+  const windowBeats = barsToPrint * beatsPerBar;
+  const globalBeatStart = Math.max(0, Number(progState?.beatCounter) || 0);
   const solved = resolveSoloChordAndScale(tonicPc);
   const chord = solved?.chord || { intervals: [0, 4, 7, 11] };
   const scaleIvals = solved?.scaleIvals || SCALE_TYPES.major.intervals;
   const scaleKey = solved?.scaleKey || "major";
-  const { attacks, windowEnd } = buildSoloQuantizedTimeline(rhythmId, beatSec, windowBeats, 0);
-  const rel = generateSoloDegrees(patternId, chord.intervals, scaleIvals, 0, attacks.length);
-  const baseMidi = midiTonic(tonicPc, 4);
+  const progMode = (document.getElementById("soloContextMode")?.value ?? "static_key") === "progression";
+  const progActive = progMode && progState?.enabled && Array.isArray(progState?.resolved) && progState.resolved.length > 0;
+  const startBarIdx = Math.floor(globalBeatStart / beatsPerBar);
   const notes = [];
-  for (let i = 0; i < attacks.length; i += 1) {
-    const midi = soloMidiToPlayableRange(baseMidi + (rel[i] ?? 0), tonicPc, soloOctUi);
-    notes.push({ midi, off: attacks[i].off, dur: attacks[i].dur });
+  let patternCursor = 0;
+
+  for (let bar = 0; bar < barsToPrint; bar += 1) {
+    const barStart = bar * beatsPerBar * beatSec;
+    let barChord = chord;
+    let barScaleIvals = scaleIvals;
+    let barRootPc = tonicPc;
+    if (progActive) {
+      const at = stepAtBar(progState.resolved, startBarIdx + bar);
+      const st = at?.step;
+      if (st?.chord) {
+        barChord = st.chord;
+        barRootPc = ((st.chord.rootPc % 12) + 12) % 12;
+      }
+      if (st?.scale && SCALE_TYPES[st.scale]?.intervals) {
+        barScaleIvals = SCALE_TYPES[st.scale].intervals;
+      }
+    } else if (typeof barChord?.rootPc === "number") {
+      barRootPc = ((barChord.rootPc % 12) + 12) % 12;
+    }
+
+    const barAttacks = [];
+    for (let b = 0; b < beatsPerBar; b += 1) {
+      const bib = (globalBeatStart + bar * beatsPerBar + b) % beatsPerBar;
+      const { offsets, durs } = soloRhythmOffsets(rhythmId, beatSec, bib);
+      for (let i = 0; i < offsets.length; i += 1) {
+        barAttacks.push({
+          off: barStart + b * beatSec + offsets[i],
+          dur: durs[i],
+        });
+      }
+    }
+    const rel = generateSoloDegrees(
+      patternId,
+      barChord?.intervals || chord.intervals || [0, 4, 7, 11],
+      barScaleIvals,
+      patternCursor,
+      barAttacks.length,
+    );
+    patternCursor += barAttacks.length;
+    const baseMidi = midiTonic(barRootPc, 4);
+    for (let i = 0; i < barAttacks.length; i += 1) {
+      const midi = soloMidiToPlayableRange(baseMidi + (rel[i] ?? 0), barRootPc, soloOctUi);
+      notes.push({ midi, off: barAttacks[i].off, dur: barAttacks[i].dur });
+    }
   }
-  return { tonicPc, scaleKey, patternId, rhythmId, notes, windowEnd };
+  return {
+    tonicPc,
+    scaleKey,
+    patternId,
+    rhythmId,
+    notes,
+    windowEnd: windowBeats * beatSec,
+    beatCount: windowBeats,
+    usesProgression: progActive,
+  };
 }
 
 function renderSoloTimedPrintStaff(host, notes, opts) {
@@ -2207,7 +2291,7 @@ function renderSoloTimedPrintStaff(host, notes, opts) {
   const svgH = 188;
   const innerLo = staffLeft + 38;
   const innerHi = staffRight - 10;
-  const beatCount = 4;
+  const beatCount = Math.max(1, Math.round(Number(opts.beatCount) || 4));
   const windowEnd = Math.max(0.001, Number(opts.windowEnd) || 4);
   const noteFill = "rgba(150, 210, 255, 0.32)";
   const noteStroke = "rgba(190, 230, 255, 0.95)";
@@ -2351,9 +2435,12 @@ function renderCurrentSoloCombinationSheetForPrint() {
   wrap.appendChild(title);
   const meta = document.createElement("p");
   meta.className = "solo-sheet-print-meta";
+  const progHint = d.usesProgression
+    ? "Fonte harmônica: sequência de acordes ativa."
+    : "Fonte harmônica: contexto estático atual.";
   meta.textContent =
     `Tônica: ${pcToName(d.tonicPc, preferFlats())}. Escala: ${SCALE_TYPES[d.scaleKey]?.label || d.scaleKey}. ` +
-    `Padrão: ${patternLabel}. Ritmo: ${rhythmLabel}. Guarde como PDF no diálogo de impressão.`;
+    `Padrão: ${patternLabel}. Ritmo: ${rhythmLabel}. ${progHint} Guarde como PDF no diálogo de impressão.`;
   wrap.appendChild(meta);
   const block = document.createElement("article");
   block.className = "solo-sheet-print-item";
@@ -2366,7 +2453,10 @@ function renderCurrentSoloCombinationSheetForPrint() {
   block.appendChild(staffHost);
   renderSoloTimedPrintStaff(staffHost, d.notes, {
     windowEnd: d.windowEnd,
-    titleLine: "Frase de 4 tempos com posicionamento rítmico real",
+    beatCount: d.beatCount,
+    titleLine: d.usesProgression
+      ? "Frase de 4 compassos com sequência de acordes + ritmo real"
+      : "Frase de 4 compassos com posicionamento rítmico real",
   });
   wrap.appendChild(block);
   host.textContent = "";
@@ -6158,6 +6248,8 @@ function wireGlobalControls() {
       // Rebuild completo para refletir imediatamente a transposição escrita
       // em todas as pautas (principal, harmonia e baixo/base).
       rebuildNotationStaffFromCurrentBeatThenRender();
+      refreshLiveNotePillLabelsFromDatasets();
+      refreshPlayheadDashboard();
     });
   }
   const btnTransposeBbEl = document.getElementById("btnTransposeBb");
@@ -6452,6 +6544,85 @@ function wireGlobalControls() {
   updateSampleControlsEnabled();
 }
 
+const UI_OUTLINE_ICON_PATHS = {
+  music: "M8 4v11m0 0c-1.4 0-2.5 1-2.5 2.2S6.6 19.5 8 19.5s2.5-1 2.5-2.3V8.2l6-1.5v8.3m0 0c-1.4 0-2.5 1-2.5 2.2s1.1 2.3 2.5 2.3 2.5-1 2.5-2.3V4.5L8 7.2",
+  pulse: "M3 12h3l2-4 3 8 2-4h8",
+  staff: "M3 7h18M3 10h18M3 13h18M3 16h18M7.5 17.5V8",
+  chord: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
+  harmony: "M4 17V7l4-2v10l8-2v6",
+  solo: "M10 4h4v4h-4zM9 8h6l1 11h-2l-.5-4h-3L10 19H8z",
+  play: "M8 5l10 7-10 7z",
+  stop: "M7 7h10v10H7z",
+  mic: "M12 4a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 1 0 5 0v-4A2.5 2.5 0 0 0 12 4zm-5 6.5a5 5 0 0 0 10 0M12 16v4m-3 0h6",
+  mute: "M4 10h4l4-4v12l-4-4H4zM16 9l4 6M20 9l-4 6",
+  volume: "M4 10h4l4-4v12l-4-4H4zM16 9a4 4 0 0 1 0 6",
+  save: "M5 4h12l2 2v14H5zM8 4v5h8V4M8 20v-6h8v6",
+  folder: "M3 7h6l2 2h10v11H3z",
+  trash: "M6 7h12M9 7V5h6v2M8 7l1 12h6l1-12",
+  print: "M7 8V4h10v4M6 18h12v-5H6zM4 10h16v5H4z",
+  tune: "M4 7h10M16 7h4M10 7v5M4 12h4M10 12h10M14 12v5M4 17h12M18 17h2M8 17v5",
+  tonic: "M12 4a8 8 0 1 0 8 8h-8z",
+  field: "M5 6h14M5 12h14M5 18h10",
+};
+
+function createUiOutlineIcon(iconId) {
+  const pathD = UI_OUTLINE_ICON_PATHS[iconId];
+  if (!pathD) return null;
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("class", "ui-ico-outline");
+  svg.dataset.iconId = iconId;
+  const path = document.createElementNS(NS, "path");
+  path.setAttribute("d", pathD);
+  svg.appendChild(path);
+  return svg;
+}
+
+function prependUiOutlineIcon(el, iconId, extraClass) {
+  if (!el || !iconId) return;
+  const existing = el.querySelector(":scope > .ui-ico-outline");
+  if (existing?.dataset?.iconId === iconId) return;
+  if (existing) existing.remove();
+  const ico = createUiOutlineIcon(iconId);
+  if (!ico) return;
+  if (extraClass) ico.classList.add(extraClass);
+  el.prepend(ico);
+}
+
+/** Camada visual: ícones outline minimalistas nos elementos principais. */
+function applyVisualIcons() {
+  const pairs = [
+    ["h1", "music"],
+    [".playhead-dash-title", "pulse"],
+    [".notation-panel-title", "staff"],
+    [".playhead-dash-card--chord .playhead-dash-label", "chord"],
+    [".playhead-dash-card--harm .playhead-dash-label", "harmony"],
+    [".playhead-dash-card--solo .playhead-dash-label", "solo"],
+    [".js-scale-play", "play"],
+    [".js-scale-stop", "stop"],
+    [".js-solo-play", "mic"],
+    [".js-solo-stop", "stop"],
+    ["#btnAudio", "volume"],
+    ["#btnExport", "save"],
+    ["#btnPrintSoloSheets", "print"],
+    ["#btnSoloComboSave", "save"],
+    ["#btnSoloComboLoad", "folder"],
+    ["#btnSoloComboDelete", "trash"],
+    ["#btnMode", "tune"],
+    ["#btnTonicSound", "tonic"],
+    ["#btnMuteAll", "mute"],
+  ];
+  for (const [sel, iconId] of pairs) {
+    document.querySelectorAll(sel).forEach((el) => prependUiOutlineIcon(el, iconId));
+  }
+  // Labels secundárias / campos de formulário.
+  document
+    .querySelectorAll(".field > span, .fx-slider > span, .notation-staff-block-label, .playhead-dash-footnote")
+    .forEach((el) => prependUiOutlineIcon(el, "field", "ui-ico-outline--subtle"));
+}
+
 // init
 populateSelects();
 renderScaleMeta();
@@ -6460,6 +6631,7 @@ updateScaleStarLabels();
 buildSlots();
 wireGlobalControls();
 wireProgressionControls();
+applyVisualIcons();
 progResolveFromUI();
 progRefreshCifras();
 progRenderStatus();
