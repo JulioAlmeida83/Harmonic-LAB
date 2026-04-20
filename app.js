@@ -1737,6 +1737,7 @@ let sampleBassPatIndex = 0;
 let soloPatIndex = 0;
 let lastSoloChordSig = "";
 let lastCycleAdvanceSoloBeat = -1;
+let suppressLoopRestartOnContextChange = false;
 /** MIDI do acorde na faixa «ouvir harmonia» / pills (concerto). */
 let liveNotationHarmonyMidis = [];
 /** Pentagrama: 4 compassos — tônica, baixo, slots (sem harmonia do acorde). */
@@ -4053,7 +4054,7 @@ function refreshSampleExecutionLoop() {
             startGlobalBeat > 0 &&
             startGlobalBeat !== lastCycleAdvanceSoloBeat
           ) {
-            if (advanceTonicByCycleStep()) {
+            if (advanceTonicByCycleStep({ suppressLoopRestart: true })) {
               lastCycleAdvanceSoloBeat = startGlobalBeat;
               tcpSolo = currentTonicPc();
               ctxSolo = resolveSoloChordAndScale(tcpSolo);
@@ -4421,7 +4422,7 @@ function cycleTraverseStepSemitones() {
   return 0;
 }
 
-function advanceTonicByCycleStep() {
+function advanceTonicByCycleStep(opts = {}) {
   const step = cycleTraverseStepSemitones();
   if (!step) return false;
   const tonicEl = document.getElementById("tonic");
@@ -4429,7 +4430,13 @@ function advanceTonicByCycleStep() {
   const nextPc = ((currentTonicPc() + step) % 12 + 12) % 12;
   const nextName = pcToName(nextPc, preferFlats());
   tonicEl.value = nextName;
-  tonicEl.dispatchEvent(new Event("change", { bubbles: true }));
+  const suppressRestart = !!opts.suppressLoopRestart;
+  if (suppressRestart) suppressLoopRestartOnContextChange = true;
+  try {
+    tonicEl.dispatchEvent(new Event("change", { bubbles: true }));
+  } finally {
+    if (suppressRestart) suppressLoopRestartOnContextChange = false;
+  }
   return true;
 }
 
@@ -6347,6 +6354,7 @@ function wireGlobalControls() {
     progRefreshCifras();
     progRenderStatus();
     rebuildNotationStaffFromCurrentBeatThenRender();
+    if (suppressLoopRestartOnContextChange) return;
     scheduleSyncAudio();
     refreshSampleExecutionLoop();
   };
@@ -6812,7 +6820,8 @@ function wireGlobalControls() {
     }
     syncAudio();
     if (iteration > 0) {
-      advanceTonicByCycleStep();
+      // Evita reboot do loop de amostras no meio da troca de tonalidade.
+      advanceTonicByCycleStep({ suppressLoopRestart: true });
     }
     const tcp = currentTonicPc();
     const ivals = currentIvals();
