@@ -2438,6 +2438,8 @@ function buildSoloCurrentCombinationPrintData() {
     notes,
     windowEnd: windowBeats * beatSec,
     beatCount: windowBeats,
+    beatsPerBar,
+    beatSec,
     usesProgression: progActive,
     printUsesTonicCycle,
     cycleStepSemitones: cycleStep,
@@ -2499,183 +2501,314 @@ function buildSoloEventsForContext(opts) {
   return { notes, nextPatternIndex: patternStartIndex + eventCount };
 }
 
-function renderSoloTimedPrintStaff(host, notes, opts) {
-  const NS = LIVE_NOTATION_NS;
-  host.textContent = "";
+/**
+ * Planeia geometria da partitura impressa do solo (vários sistemas por compasso)
+ * antes de criar nós SVG — evita uma única faixa horizontal e colisões óbvias.
+ */
+function buildSoloPrintTimedStaffPlan(notes, opts) {
   const pf = preferFlats();
-  const tr = readWrittenTransposeSemitones();
   const lineGap = 14;
   const svgW = 940;
   const staffLeft = 48;
   const staffRight = svgW - 12;
   const staffBottom0 = 108;
   const staffTop = staffBottom0 - 4 * lineGap;
-  const svgH = 188;
   const innerLo = staffLeft + 38;
   const innerHi = staffRight - 10;
-  const beatCount = Math.max(1, Math.round(Number(opts.beatCount) || 4));
   const windowEnd = Math.max(0.001, Number(opts.windowEnd) || 4);
-  const beatDurSec = windowEnd / beatCount;
+  const beatCount = Math.max(1, Math.round(Number(opts.beatCount) || 4));
+  const secPerBeat = windowEnd / beatCount;
+  const beatsPerBar = Math.max(1, Math.round(Number(opts.beatsPerBar) || PROG_BEATS_PER_BAR));
+  const measureDur = beatsPerBar * secPerBeat;
+  const numSystems = Math.max(1, Math.ceil(windowEnd / measureDur - 1e-9));
+  const beatDurSec = secPerBeat;
+  const marginTop = 6;
+  const systemTitleH = 18;
+  const rhythmLaneY = staffBottom0 + 18;
+  const perSystemH = rhythmLaneY + 52;
+  const systemGap = 22;
+  const svgH = marginTop + systemTitleH + numSystems * perSystemH + (numSystems - 1) * systemGap + 8;
+  const totalNotes = Array.isArray(notes) ? notes.length : 0;
+  const labelStride = totalNotes > 18 ? 2 : 1;
+
+  const systems = [];
+  for (let b = 0; b < numSystems; b += 1) {
+    const t0 = b * measureDur;
+    const t1 = Math.min(windowEnd, (b + 1) * measureDur);
+    const mdur = Math.max(0.001, t1 - t0);
+    const layoutNotes = [];
+    let seq = 0;
+    for (const note of notes) {
+      const cMidi = Number(note.midi);
+      if (!Number.isFinite(cMidi)) continue;
+      const off = Number(note.off) || 0;
+      if (off < t0 || off >= t1) continue;
+      const wMidi = wrapNotationMidiNearStaff(concertToWrittenMidi(cMidi));
+      const sp = parseMidiStaffSpelling(wMidi, pf);
+      const stStepRaw = letterOctaveToStaffStepFromE4(sp.letter, sp.octave);
+      const dur = Math.max(0.024, Number(note.dur) || 0.1);
+      const offRel = Math.max(0, off - t0);
+      const durClip = Math.min(dur, t1 - off);
+      const endRel = Math.min(mdur, offRel + durClip);
+      const xBase = innerLo + ((innerHi - innerLo) * offRel) / mdur;
+      const xEndBase = innerLo + ((innerHi - innerLo) * endRel) / mdur;
+      layoutNotes.push({
+        cMidi,
+        wMidi,
+        sp,
+        stStepRaw,
+        offRel,
+        endRel,
+        xBase,
+        xEndBase,
+        seq,
+      });
+      seq += 1;
+    }
+    layoutNotes.sort((a, z) => a.xBase - z.xBase || a.seq - z.seq);
+    const MIN_HEAD_GAP = 15;
+    let prevX = -Infinity;
+    for (const ln of layoutNotes) {
+      let x = ln.xBase;
+      if (prevX > -Infinity && x - prevX < MIN_HEAD_GAP) {
+        x = prevX + MIN_HEAD_GAP;
+      }
+      const maxShift = innerHi - 10 - x;
+      if (maxShift < 0) x = innerHi - 10;
+      const shift = x - ln.xBase;
+      ln.x = x;
+      ln.xEnd = Math.min(innerHi, ln.xEndBase + shift);
+      prevX = x;
+    }
+    systems.push({
+      barIndex: b,
+      t0,
+      t1,
+      mdur,
+      staffBottom0,
+      staffTop,
+      staffLeft,
+      staffRight,
+      innerLo,
+      innerHi,
+      beatsPerBar,
+      layoutNotes,
+    });
+  }
+  return {
+    svgW,
+    svgH,
+    marginTop,
+    systemTitleH,
+    perSystemH,
+    systemGap,
+    lineGap,
+    staffBottom0,
+    staffTop,
+    staffLeft,
+    staffRight,
+    innerLo,
+    innerHi,
+    windowEnd,
+    beatCount,
+    beatDurSec,
+    beatsPerBar,
+    numSystems,
+    systems,
+    labelStride,
+  };
+}
+
+function renderSoloTimedPrintStaff(host, notes, opts) {
+  const NS = LIVE_NOTATION_NS;
+  host.textContent = "";
+  const pf = preferFlats();
+  const plan = buildSoloPrintTimedStaffPlan(notes, opts);
+  const { svgW, svgH, marginTop, systemTitleH, perSystemH, systemGap, lineGap, systems, labelStride } = plan;
   const noteFill = "rgba(150, 210, 255, 0.32)";
   const noteStroke = "rgba(190, 230, 255, 0.95)";
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("viewBox", `0 0 ${svgW} ${svgH}`);
   svg.setAttribute("class", "notation-live-svg");
   svg.setAttribute("aria-hidden", "true");
-  const g = document.createElementNS(NS, "g");
+  const gRoot = document.createElementNS(NS, "g");
 
-  for (let k = 0; k < 5; k += 1) {
-    const ly = staffBottom0 - k * lineGap;
-    const line = document.createElementNS(NS, "line");
-    line.setAttribute("x1", String(staffLeft));
-    line.setAttribute("x2", String(staffRight));
-    line.setAttribute("y1", String(ly));
-    line.setAttribute("y2", String(ly));
-    line.setAttribute("stroke", "rgba(255,255,255,0.24)");
-    line.setAttribute("stroke-width", "1");
-    g.appendChild(line);
-  }
+  let globalNoteIdx = 0;
+  for (let si = 0; si < systems.length; si += 1) {
+    const sys = systems[si];
+    const g = document.createElementNS(NS, "g");
+    const dy = marginTop + systemTitleH + si * (perSystemH + systemGap);
+    g.setAttribute("transform", `translate(0, ${dy})`);
+    const staffBottom0 = sys.staffBottom0;
+    const staffTop = sys.staffTop;
+    const staffLeft = sys.staffLeft;
+    const staffRight = sys.staffRight;
+    const innerLo = sys.innerLo;
+    const innerHi = sys.innerHi;
 
-  const clef = document.createElementNS(NS, "text");
-  clef.setAttribute("x", "8");
-  clef.setAttribute("y", String(staffBottom0 - 28));
-  clef.setAttribute("font-size", "42");
-  clef.setAttribute("class", "notation-clef-g");
-  clef.textContent = "\uD834\uDD1E";
-  g.appendChild(clef);
+    for (let k = 0; k < 5; k += 1) {
+      const ly = staffBottom0 - k * lineGap;
+      const line = document.createElementNS(NS, "line");
+      line.setAttribute("x1", String(staffLeft));
+      line.setAttribute("x2", String(staffRight));
+      line.setAttribute("y1", String(ly));
+      line.setAttribute("y2", String(ly));
+      line.setAttribute("stroke", "rgba(255,255,255,0.24)");
+      line.setAttribute("stroke-width", "1");
+      g.appendChild(line);
+    }
 
-  for (let j = 1; j < beatCount; j += 1) {
-    const x = innerLo + ((innerHi - innerLo) * j) / beatCount;
-    const bl = document.createElementNS(NS, "line");
-    bl.setAttribute("x1", String(x));
-    bl.setAttribute("x2", String(x));
-    bl.setAttribute("y1", String(staffTop - 4));
-    bl.setAttribute("y2", String(staffBottom0 + 4));
-    bl.setAttribute("stroke", "rgba(255,255,255,0.28)");
-    bl.setAttribute("stroke-width", "1");
-    g.appendChild(bl);
-  }
+    const clef = document.createElementNS(NS, "text");
+    clef.setAttribute("x", "8");
+    clef.setAttribute("y", String(staffBottom0 - 28));
+    clef.setAttribute("font-size", "42");
+    clef.setAttribute("class", "notation-clef-g");
+    clef.textContent = "\uD834\uDD1E";
+    g.appendChild(clef);
 
-  const title = document.createElementNS(NS, "text");
-  title.setAttribute("x", "6");
-  title.setAttribute("y", "16");
-  title.setAttribute("fill", "#9aa3b2");
-  title.setAttribute("font-size", "10.5");
-  title.setAttribute("font-weight", "600");
-  title.textContent = opts.titleLine || "";
-  g.appendChild(title);
+    const barLeft = document.createElementNS(NS, "line");
+    barLeft.setAttribute("x1", String(staffLeft));
+    barLeft.setAttribute("x2", String(staffLeft));
+    barLeft.setAttribute("y1", String(staffTop - 4));
+    barLeft.setAttribute("y2", String(staffBottom0 + 4));
+    barLeft.setAttribute("stroke", "rgba(255,255,255,0.35)");
+    barLeft.setAttribute("stroke-width", "1.2");
+    g.appendChild(barLeft);
+    const barRight = document.createElementNS(NS, "line");
+    barRight.setAttribute("x1", String(staffRight));
+    barRight.setAttribute("x2", String(staffRight));
+    barRight.setAttribute("y1", String(staffTop - 4));
+    barRight.setAttribute("y2", String(staffBottom0 + 4));
+    barRight.setAttribute("stroke", "rgba(255,255,255,0.42)");
+    barRight.setAttribute("stroke-width", "1.35");
+    g.appendChild(barRight);
 
-  const drawLedgerLines = (x, step) => {
-    const drawAtStep = (s) => {
-      const y = staffBottom0 - s * (lineGap / 2);
-      const lx = document.createElementNS(NS, "line");
-      lx.setAttribute("x1", String(x - 16));
-      lx.setAttribute("x2", String(x + 18));
-      lx.setAttribute("y1", String(y));
-      lx.setAttribute("y2", String(y));
-      lx.setAttribute("stroke", "rgba(255,255,255,0.34)");
-      lx.setAttribute("stroke-width", "1");
-      g.appendChild(lx);
+    for (let j = 1; j < sys.beatsPerBar; j += 1) {
+      const x = innerLo + ((innerHi - innerLo) * j) / sys.beatsPerBar;
+      const bl = document.createElementNS(NS, "line");
+      bl.setAttribute("x1", String(x));
+      bl.setAttribute("x2", String(x));
+      bl.setAttribute("y1", String(staffTop - 4));
+      bl.setAttribute("y2", String(staffBottom0 + 4));
+      bl.setAttribute("stroke", "rgba(255,255,255,0.28)");
+      bl.setAttribute("stroke-width", "1");
+      g.appendChild(bl);
+    }
+
+    if (si === 0) {
+      const title = document.createElementNS(NS, "text");
+      title.setAttribute("x", "6");
+      title.setAttribute("y", "14");
+      title.setAttribute("fill", "#9aa3b2");
+      title.setAttribute("font-size", "10.5");
+      title.setAttribute("font-weight", "600");
+      title.textContent = opts.titleLine || "";
+      g.appendChild(title);
+    }
+
+    const barTag = document.createElementNS(NS, "text");
+    barTag.setAttribute("x", String(staffRight - 6));
+    barTag.setAttribute("y", String(staffTop - 10));
+    barTag.setAttribute("fill", "#7a8494");
+    barTag.setAttribute("font-size", "9");
+    barTag.setAttribute("font-weight", "600");
+    barTag.setAttribute("text-anchor", "end");
+    barTag.textContent = `Compasso ${sys.barIndex + 1}`;
+    g.appendChild(barTag);
+
+    const drawLedgerLines = (x, step) => {
+      const drawAtStep = (s) => {
+        const yL = staffBottom0 - s * (lineGap / 2);
+        const lx = document.createElementNS(NS, "line");
+        lx.setAttribute("x1", String(x - 16));
+        lx.setAttribute("x2", String(x + 18));
+        lx.setAttribute("y1", String(yL));
+        lx.setAttribute("y2", String(yL));
+        lx.setAttribute("stroke", "rgba(255,255,255,0.34)");
+        lx.setAttribute("stroke-width", "1");
+        g.appendChild(lx);
+      };
+      if (step <= -2) for (let s = -2; s >= step; s -= 2) drawAtStep(s);
+      else if (step >= 10) for (let s = 10; s <= step; s += 2) drawAtStep(s);
     };
-    if (step <= -2) for (let s = -2; s >= step; s -= 2) drawAtStep(s);
-    else if (step >= 10) for (let s = 10; s <= step; s += 2) drawAtStep(s);
-  };
 
-  const rhythmToken = (durSec) => {
-    const dBeats = Math.max(0.01, durSec / Math.max(0.001, beatDurSec));
-    if (dBeats >= 0.9) return "1/4";
-    if (dBeats >= 0.45) return "1/8";
-    if (dBeats >= 0.28) return "1/12";
-    return "1/16";
-  };
+    const laneY = staffBottom0 + 18;
+    for (const ln of sys.layoutNotes) {
+      const { wMidi, sp, stStepRaw, x, xEnd } = ln;
+      const stStep = stStepRaw;
+      const y = staffBottom0 - stStep * (lineGap / 2);
+      drawLedgerLines(x, stStep);
+      if (sp.acc) {
+        const ax = document.createElementNS(NS, "text");
+        ax.setAttribute("x", String(x - 18));
+        ax.setAttribute("y", String(y + 5));
+        ax.setAttribute("font-size", "16");
+        ax.setAttribute("fill", sp.acc === "♯" ? "#72d572" : "#ffd35a");
+        ax.setAttribute("font-family", "Georgia, 'Times New Roman', serif");
+        ax.textContent = sp.acc;
+        g.appendChild(ax);
+      }
+      const head = document.createElementNS(NS, "ellipse");
+      head.setAttribute("cx", String(x));
+      head.setAttribute("cy", String(y));
+      head.setAttribute("rx", "7");
+      head.setAttribute("ry", "5");
+      head.setAttribute("fill", noteFill);
+      head.setAttribute("stroke", noteStroke);
+      head.setAttribute("stroke-width", "1.2");
+      g.appendChild(head);
+      const stem = document.createElementNS(NS, "line");
+      const stemDown = stStep >= 3;
+      if (stemDown) {
+        stem.setAttribute("x1", String(x + 4.5));
+        stem.setAttribute("x2", String(x + 4.5));
+        stem.setAttribute("y1", String(y + 2));
+        stem.setAttribute("y2", String(y + 28));
+      } else {
+        stem.setAttribute("x1", String(x - 4.5));
+        stem.setAttribute("x2", String(x - 4.5));
+        stem.setAttribute("y1", String(y - 2));
+        stem.setAttribute("y2", String(y - 28));
+      }
+      stem.setAttribute("stroke", noteStroke);
+      stem.setAttribute("stroke-width", "1.25");
+      stem.setAttribute("stroke-linecap", "round");
+      g.appendChild(stem);
 
-  const labelStride = notes.length > 18 ? 2 : 1;
-  let noteIdx = 0;
-  for (const note of notes) {
-    const cMidi = Number(note.midi);
-    if (!Number.isFinite(cMidi)) continue;
-    const wMidi = wrapNotationMidiNearStaff(concertToWrittenMidi(cMidi));
-    const sp = parseMidiStaffSpelling(wMidi, pf);
-    const stStepRaw = letterOctaveToStaffStepFromE4(sp.letter, sp.octave);
-    const stStep = Math.max(-4, Math.min(12, stStepRaw));
-    const y = staffBottom0 - stStep * (lineGap / 2);
-    const off = Math.max(0, Math.min(windowEnd, note.off || 0));
-    const dur = Math.max(0.024, Number(note.dur) || 0.1);
-    const x = innerLo + ((innerHi - innerLo) * off) / windowEnd;
-    const xEnd = innerLo + ((innerHi - innerLo) * Math.max(off, Math.min(windowEnd, off + dur))) / windowEnd;
-    drawLedgerLines(x, stStep);
-    if (sp.acc) {
-      const ax = document.createElementNS(NS, "text");
-      ax.setAttribute("x", String(x - 18));
-      ax.setAttribute("y", String(y + 5));
-      ax.setAttribute("font-size", "16");
-      ax.setAttribute("fill", sp.acc === "♯" ? "#72d572" : "#ffd35a");
-      ax.setAttribute("font-family", "Georgia, 'Times New Roman', serif");
-      ax.textContent = sp.acc;
-      g.appendChild(ax);
+      const rLine = document.createElementNS(NS, "line");
+      rLine.setAttribute("x1", String(Math.max(innerLo, x - 2)));
+      rLine.setAttribute("x2", String(Math.min(innerHi, xEnd)));
+      rLine.setAttribute("y1", String(laneY));
+      rLine.setAttribute("y2", String(laneY));
+      rLine.setAttribute("stroke", "rgba(150, 210, 255, 0.92)");
+      rLine.setAttribute("stroke-width", "2.2");
+      rLine.setAttribute("stroke-linecap", "round");
+      g.appendChild(rLine);
+      const rTick = document.createElementNS(NS, "line");
+      rTick.setAttribute("x1", String(Math.min(innerHi, xEnd)));
+      rTick.setAttribute("x2", String(Math.min(innerHi, xEnd)));
+      rTick.setAttribute("y1", String(laneY - 4));
+      rTick.setAttribute("y2", String(laneY + 4));
+      rTick.setAttribute("stroke", "rgba(150, 210, 255, 0.92)");
+      rTick.setAttribute("stroke-width", "1.4");
+      g.appendChild(rTick);
+      if (globalNoteIdx % labelStride === 0) {
+        const durLabel = document.createElementNS(NS, "text");
+        durLabel.setAttribute("x", String(x));
+        durLabel.setAttribute("y", String(y + 38));
+        durLabel.setAttribute("fill", "#c5cad6");
+        durLabel.setAttribute("font-size", "8");
+        durLabel.setAttribute("text-anchor", "middle");
+        durLabel.textContent = notationLabelPt(wMidi, pf);
+        g.appendChild(durLabel);
+      }
+      globalNoteIdx += 1;
     }
-    const head = document.createElementNS(NS, "ellipse");
-    head.setAttribute("cx", String(x));
-    head.setAttribute("cy", String(y));
-    head.setAttribute("rx", "7");
-    head.setAttribute("ry", "5");
-    head.setAttribute("fill", noteFill);
-    head.setAttribute("stroke", noteStroke);
-    head.setAttribute("stroke-width", "1.2");
-    g.appendChild(head);
-    const stem = document.createElementNS(NS, "line");
-    const stemDown = stStep >= 3;
-    if (stemDown) {
-      stem.setAttribute("x1", String(x + 4.5));
-      stem.setAttribute("x2", String(x + 4.5));
-      stem.setAttribute("y1", String(y + 2));
-      stem.setAttribute("y2", String(y + 28));
-    } else {
-      stem.setAttribute("x1", String(x - 4.5));
-      stem.setAttribute("x2", String(x - 4.5));
-      stem.setAttribute("y1", String(y - 2));
-      stem.setAttribute("y2", String(y - 28));
-    }
-    stem.setAttribute("stroke", noteStroke);
-    stem.setAttribute("stroke-width", "1.25");
-    stem.setAttribute("stroke-linecap", "round");
-    g.appendChild(stem);
 
-    // Barra de duração para tornar o ritmo explícito no impresso.
-    const laneY = staffBottom0 + 16;
-    const rLine = document.createElementNS(NS, "line");
-    rLine.setAttribute("x1", String(Math.max(innerLo, x - 2)));
-    rLine.setAttribute("x2", String(Math.min(innerHi, xEnd)));
-    rLine.setAttribute("y1", String(laneY));
-    rLine.setAttribute("y2", String(laneY));
-    rLine.setAttribute("stroke", "rgba(150, 210, 255, 0.92)");
-    rLine.setAttribute("stroke-width", "2.2");
-    rLine.setAttribute("stroke-linecap", "round");
-    g.appendChild(rLine);
-    const rTick = document.createElementNS(NS, "line");
-    rTick.setAttribute("x1", String(Math.min(innerHi, xEnd)));
-    rTick.setAttribute("x2", String(Math.min(innerHi, xEnd)));
-    rTick.setAttribute("y1", String(laneY - 4));
-    rTick.setAttribute("y2", String(laneY + 4));
-    rTick.setAttribute("stroke", "rgba(150, 210, 255, 0.92)");
-    rTick.setAttribute("stroke-width", "1.4");
-    g.appendChild(rTick);
-    // Em passagens densas, reduzir o número de rótulos evita sobreposição.
-    if (noteIdx % labelStride === 0) {
-      const durLabel = document.createElementNS(NS, "text");
-      durLabel.setAttribute("x", String(x));
-      durLabel.setAttribute("y", String(y + 38));
-      durLabel.setAttribute("fill", "#c5cad6");
-      durLabel.setAttribute("font-size", "8");
-      durLabel.setAttribute("text-anchor", "middle");
-      const wLab = notationLabelPt(wMidi, pf);
-      durLabel.textContent = wLab;
-      g.appendChild(durLabel);
-    }
-    noteIdx += 1;
+    gRoot.appendChild(g);
   }
 
-  svg.appendChild(g);
+  svg.appendChild(gRoot);
   host.appendChild(svg);
 }
 
@@ -2728,6 +2861,7 @@ function renderCurrentSoloCombinationSheetForPrint() {
   renderSoloTimedPrintStaff(staffHost, d.notes, {
     windowEnd: d.windowEnd,
     beatCount: d.beatCount,
+    beatsPerBar: d.beatsPerBar ?? PROG_BEATS_PER_BAR,
     titleLine: d.printUsesTonicCycle
       ? `4 compassos: ciclo de ${d.cycleStepSemitones === 7 ? "quintas" : "quartas"} (1 tônica por compasso) + ritmo`
       : d.usesProgression
