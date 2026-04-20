@@ -593,8 +593,8 @@
         <label class="field">
           <span>Contexto do solo</span>
           <select id="soloContextMode" title="«Solo na tonalidade» não precisa de «Ativar sequência». «Seguir sequência» só muda os acordes do solo quando a sequência está ligada e tem passos; senão o motor usa a mesma base que na tonalidade.">
-            <option value="static_key" selected>Solo na tonalidade / escala (sem sequência)</option>
-            <option value="progression">Seguir sequência (quando activa)</option>
+            <option value="static_key">Solo na tonalidade / escala (sem sequência)</option>
+            <option value="progression" selected>Seguir sequência (quando activa)</option>
           </select>
         </label>
         <label class="field field-wide solo-flow-card solo-flow-card--scale">
@@ -776,7 +776,7 @@
           type="button"
           id="btnPrintSoloSheets"
           class="btn btn-compact"
-          title="Gera uma folha com partitura-resumo de todos os padrões de solo e abre impressão (Guardar como PDF)."
+          title="Imprime o snapshot do solo ao vivo (se houver). Se não houver solo ativo, usa a combinação atual selecionada."
         >Imprimir partituras das sequências (PDF)</button>
       </div>
     </div>

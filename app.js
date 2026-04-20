@@ -58,6 +58,11 @@ function midiNoteLabel(midi, preferFl, mode = "pitch") {
   return pitch;
 }
 
+/** Rótulo de nota na escrita atual (respeita transposição de partitura). */
+function writtenMidiNoteLabel(concertMidi, preferFl, mode = "pitch") {
+  return midiNoteLabel(concertToWrittenMidi(concertMidi), preferFl, mode);
+}
+
 /** Mediana MIDI de um conjunto (referência para cor de registo). */
 function medianMidi(midis) {
   if (!midis.length) return 60;
@@ -158,8 +163,8 @@ function dyadLabel(mLow, mHigh, preferFl) {
   const oct = Math.floor(diff / 12);
   const nm = DYAD_SIMPLE_NAMES.get(simple) ?? `${simple} st`;
   const intDesc = oct > 0 ? `${nm} (+${oct}×8)` : nm;
-  const n0 = midiNoteLabel(mLow, preferFl, "pitch");
-  const n1 = midiNoteLabel(mHigh, preferFl, "pitch");
+  const n0 = writtenMidiNoteLabel(mLow, preferFl, "pitch");
+  const n1 = writtenMidiNoteLabel(mHigh, preferFl, "pitch");
   return `${n0}–${n1} (${intDesc})`;
 }
 
@@ -175,7 +180,7 @@ function describeActiveSlotsChord(midis, preferFl) {
 
   if (pcs.length === 1) {
     return {
-      head: `${midiNoteLabel(sorted[0], preferFl, "pitch")} (nota única)`,
+      head: `${writtenMidiNoteLabel(sorted[0], preferFl, "pitch")} (nota única)`,
       voicingLine: null,
       instruction: "Ative mais slots para formar intervalos ou acordes.",
     };
@@ -227,7 +232,7 @@ function fillSlotChordVoicing(el, voicingLine, instruction, preferFl) {
       sp.className = "slot-voicing-note";
       const reg = midiRegisterClass(m, ref);
       if (reg) sp.classList.add(reg);
-      sp.textContent = midiNoteLabel(m, preferFl, "pitch");
+      sp.textContent = writtenMidiNoteLabel(m, preferFl, "pitch");
       el.appendChild(sp);
     });
   }
@@ -1659,7 +1664,7 @@ function fillHarmonyHearStrip(host, midis, extraClasses) {
     pill.className = ["harm-hear-pill", extraClasses].filter(Boolean).join(" ");
     pill.setAttribute("role", "listitem");
     pill.dataset.midi = String(m);
-    pill.textContent = midiNoteLabel(m, pf, "pitch");
+    pill.textContent = writtenMidiNoteLabel(m, pf, "pitch");
     const reg = midiRegisterClass(m, ref);
     if (reg) pill.classList.add(reg);
     host.appendChild(pill);
@@ -1691,7 +1696,7 @@ function renderDashSoloPills(soloMidis) {
       pill.className = "dash-solo-pill";
       pill.setAttribute("role", "listitem");
       pill.dataset.midi = String(m);
-      pill.textContent = midiNoteLabel(m, pf, "pitch");
+      pill.textContent = writtenMidiNoteLabel(m, pf, "pitch");
       const reg = midiRegisterClass(m, ref);
       if (reg) pill.classList.add(reg);
       host.appendChild(pill);
@@ -2153,8 +2158,7 @@ function renderNotationFourColumnStaffIntoHost(host, cols, opts) {
       cap.setAttribute("font-size", "8");
       cap.setAttribute("text-anchor", "middle");
       const wLab = notationLabelPt(wMidi, pf);
-      const cLab = tr !== 0 ? ` (${midiNoteLabel(cMidi, pf, "pitch")})` : "";
-      cap.textContent = `${wLab}${cLab}`;
+      cap.textContent = wLab;
       gRoot.appendChild(cap);
     }
   }
@@ -2323,8 +2327,7 @@ function renderSoloTimedPrintStaff(host, notes, opts) {
     durLabel.setAttribute("font-size", "8");
     durLabel.setAttribute("text-anchor", "middle");
     const wLab = notationLabelPt(wMidi, pf);
-    const cLab = tr !== 0 ? ` (${midiNoteLabel(cMidi, pf, "pitch")})` : "";
-    durLabel.textContent = `${wLab}${cLab}`;
+    durLabel.textContent = wLab;
     g.appendChild(durLabel);
   }
 
@@ -2368,6 +2371,54 @@ function renderCurrentSoloCombinationSheetForPrint() {
   wrap.appendChild(block);
   host.textContent = "";
   host.appendChild(wrap);
+}
+
+function hasAnyNotesInFourCols(cols) {
+  return Array.isArray(cols) && cols.some((c) => Array.isArray(c) && c.length > 0);
+}
+
+function renderLiveSoloSnapshotSheetForPrint() {
+  const host = document.getElementById("soloSheetPrintArea");
+  if (!host) return false;
+  const cols = Array.isArray(liveNotationStaffMelodyFourCols)
+    ? liveNotationStaffMelodyFourCols.map((c) => (Array.isArray(c) ? [...c] : []))
+    : [[], [], [], []];
+  if (!hasAnyNotesInFourCols(cols)) return false;
+  const wrap = document.createElement("div");
+  wrap.className = "solo-sheet-print-wrap";
+  const title = document.createElement("h1");
+  title.className = "solo-sheet-print-title";
+  title.textContent = "Harmonic Lab — Snapshot do solo ao vivo";
+  wrap.appendChild(title);
+  const meta = document.createElement("p");
+  meta.className = "solo-sheet-print-meta";
+  meta.textContent =
+    "Captura da pauta principal no momento da impressão (janela de 4 compassos: atual + próximos).";
+  wrap.appendChild(meta);
+  const block = document.createElement("article");
+  block.className = "solo-sheet-print-item";
+  const h = document.createElement("h2");
+  h.className = "solo-sheet-print-item-title";
+  h.textContent = "Solo em execução — snapshot atual";
+  block.appendChild(h);
+  const staffHost = document.createElement("div");
+  staffHost.className = "notation-staff-host solo-sheet-staff-host";
+  block.appendChild(staffHost);
+  renderNotationFourColumnStaffIntoHost(staffHost, cols, {
+    titleLine: (tr) =>
+      tr === 0
+        ? "Pauta principal ao vivo · 4 compassos"
+        : `Pauta principal ao vivo · escrito ${tr > 0 ? "+" : ""}${tr} semitons`,
+    hintEmpty: "",
+    noteFill: "rgba(190, 235, 170, 0.35)",
+    noteStroke: "rgba(225, 255, 205, 0.95)",
+    preserveOrder: true,
+    keySigSpec: keySignatureSpecFromCount(currentScaleKeySignatureCount()),
+  });
+  wrap.appendChild(block);
+  host.textContent = "";
+  host.appendChild(wrap);
+  return true;
 }
 
 /**
@@ -2532,7 +2583,7 @@ function renderScaleSeqPreview(degs, midis) {
     const pill = document.createElement("span");
     pill.className = "scale-seq-pill";
     pill.dataset.index = String(i);
-    pill.textContent = `${midiNoteLabel(midis[i], pf, "pitch")} · gr. ${degs[i]}`;
+    pill.textContent = `${writtenMidiNoteLabel(midis[i], pf, "pitch")} · gr. ${degs[i]}`;
     const reg = midiRegisterClass(midis[i], ref);
     if (reg) pill.classList.add(reg);
     host.appendChild(pill);
@@ -3657,7 +3708,7 @@ function refreshSampleExecutionLoop() {
             }
             if (soloHear) {
               const wLabel = windowBeats > PROG_BEATS_PER_BAR ? `${windowBeats / PROG_BEATS_PER_BAR} comp.` : "1 comp.";
-              const soloPitchLine = soloMidisPlayed.map((m) => midiNoteLabel(m, pfSolo, "pitch")).join(" · ");
+              const soloPitchLine = soloMidisPlayed.map((m) => writtenMidiNoteLabel(m, pfSolo, "pitch")).join(" · ");
               soloHear.textContent = soloMidisPlayed.length
                 ? `Solo (frase em ${wLabel}, quantizada ao acorde): ${soloPitchLine}`
                 : "";
@@ -5198,7 +5249,7 @@ function refreshPlayheadDashboard() {
   big.textContent = desc.head;
   const scaleLab = SCALE_TYPES[effectiveSoloScaleKey()]?.label || "—";
   const sorted = [...new Set(midis)].sort((a, b) => a - b);
-  const pitchSummary = sorted.map((m) => midiNoteLabel(m, pf, "pitch")).join(" · ");
+  const pitchSummary = sorted.map((m) => writtenMidiNoteLabel(m, pf, "pitch")).join(" · ");
   let metaLine = pitchSummary
     ? `Notas: ${pitchSummary} · Escala solo: ${scaleLab}`
     : `Harmonia: ${harmId} · Escala solo: ${scaleLab}`;
@@ -5775,7 +5826,11 @@ function wireGlobalControls() {
   const btnPrintSoloSheets = document.getElementById("btnPrintSoloSheets");
   if (btnPrintSoloSheets) {
     btnPrintSoloSheets.addEventListener("click", () => {
-      renderCurrentSoloCombinationSheetForPrint();
+      // Prioriza o que está a soar/visível na pauta agora; fallback para combinação selecionada.
+      const printedLiveSnapshot = renderLiveSoloSnapshotSheetForPrint();
+      if (!printedLiveSnapshot) {
+        renderCurrentSoloCombinationSheetForPrint();
+      }
       document.body.classList.add("print-solo-sheet");
       window.print();
       setTimeout(() => {
