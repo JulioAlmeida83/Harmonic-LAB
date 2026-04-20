@@ -961,6 +961,28 @@ h1 .ui-ico-outline {
     background: #fff;
     color: #111;
   }
+
+  /* Força alto contraste no SVG da partitura impressa. */
+  body.print-solo-sheet .solo-sheet-staff-host .notation-live-svg line {
+    stroke: #222 !important;
+    stroke-opacity: 1 !important;
+  }
+
+  body.print-solo-sheet .solo-sheet-staff-host .notation-live-svg ellipse {
+    fill: #111 !important;
+    fill-opacity: 1 !important;
+    stroke: #111 !important;
+    stroke-opacity: 1 !important;
+  }
+
+  body.print-solo-sheet .solo-sheet-staff-host .notation-live-svg text {
+    fill: #111 !important;
+    fill-opacity: 1 !important;
+  }
+
+  body.print-solo-sheet .solo-sheet-staff-host .notation-live-svg .notation-clef-g {
+    fill: #111 !important;
+  }
 }
 
 .btn-header-audio {

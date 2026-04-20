@@ -839,6 +839,10 @@ class AudioEngine {
     // ≠ principal (ver ensureBassSampler/syncBassBankSamplerFromUI). Quando
     // null, o baixo usa o instrumentSampler principal — zero overhead.
     this.bassSampler = null;
+    // Sampler dedicado ao solo. Lazy: só criado quando o user escolhe banco
+    // ≠ principal (ver ensureSoloSampler/syncSoloBankSamplerFromUI). Quando
+    // null, o solo usa o instrumentSampler principal.
+    this.soloSampler = null;
     this._harmStabPrimed = false;
     this._harmStabKey = "";
     this.fxState = {
@@ -1274,6 +1278,12 @@ class AudioEngine {
   stopSamplerVoices(fadeSec = 0.02) {
     if (this.instrumentSampler && typeof this.instrumentSampler.stopAllVoices === "function") {
       this.instrumentSampler.stopAllVoices(fadeSec);
+    }
+    if (this.bassSampler && typeof this.bassSampler.stopAllVoices === "function") {
+      this.bassSampler.stopAllVoices(fadeSec);
+    }
+    if (this.soloSampler && typeof this.soloSampler.stopAllVoices === "function") {
+      this.soloSampler.stopAllVoices(fadeSec);
     }
   }
 
@@ -2358,6 +2368,7 @@ function renderSoloTimedPrintStaff(host, notes, opts) {
   const innerHi = staffRight - 10;
   const beatCount = Math.max(1, Math.round(Number(opts.beatCount) || 4));
   const windowEnd = Math.max(0.001, Number(opts.windowEnd) || 4);
+  const beatDurSec = windowEnd / beatCount;
   const noteFill = "rgba(150, 210, 255, 0.32)";
   const noteStroke = "rgba(190, 230, 255, 0.95)";
   const svg = document.createElementNS(NS, "svg");
@@ -2423,6 +2434,14 @@ function renderSoloTimedPrintStaff(host, notes, opts) {
     else if (step >= 10) for (let s = 10; s <= step; s += 2) drawAtStep(s);
   };
 
+  const rhythmToken = (durSec) => {
+    const dBeats = Math.max(0.01, durSec / Math.max(0.001, beatDurSec));
+    if (dBeats >= 0.9) return "1/4";
+    if (dBeats >= 0.45) return "1/8";
+    if (dBeats >= 0.28) return "1/12";
+    return "1/16";
+  };
+
   for (const note of notes) {
     const cMidi = Number(note.midi);
     if (!Number.isFinite(cMidi)) continue;
@@ -2431,7 +2450,10 @@ function renderSoloTimedPrintStaff(host, notes, opts) {
     const stStepRaw = letterOctaveToStaffStepFromE4(sp.letter, sp.octave);
     const stStep = Math.max(-4, Math.min(12, stStepRaw));
     const y = staffBottom0 - stStep * (lineGap / 2);
-    const x = innerLo + ((innerHi - innerLo) * Math.max(0, Math.min(windowEnd, note.off || 0))) / windowEnd;
+    const off = Math.max(0, Math.min(windowEnd, note.off || 0));
+    const dur = Math.max(0.024, Number(note.dur) || 0.1);
+    const x = innerLo + ((innerHi - innerLo) * off) / windowEnd;
+    const xEnd = innerLo + ((innerHi - innerLo) * Math.max(off, Math.min(windowEnd, off + dur))) / windowEnd;
     drawLedgerLines(x, stStep);
     if (sp.acc) {
       const ax = document.createElementNS(NS, "text");
@@ -2469,6 +2491,26 @@ function renderSoloTimedPrintStaff(host, notes, opts) {
     stem.setAttribute("stroke-width", "1.25");
     stem.setAttribute("stroke-linecap", "round");
     g.appendChild(stem);
+
+    // Barra de duração para tornar o ritmo explícito no impresso.
+    const laneY = staffBottom0 + 16;
+    const rLine = document.createElementNS(NS, "line");
+    rLine.setAttribute("x1", String(Math.max(innerLo, x - 2)));
+    rLine.setAttribute("x2", String(Math.min(innerHi, xEnd)));
+    rLine.setAttribute("y1", String(laneY));
+    rLine.setAttribute("y2", String(laneY));
+    rLine.setAttribute("stroke", "rgba(150, 210, 255, 0.92)");
+    rLine.setAttribute("stroke-width", "2.2");
+    rLine.setAttribute("stroke-linecap", "round");
+    g.appendChild(rLine);
+    const rTick = document.createElementNS(NS, "line");
+    rTick.setAttribute("x1", String(Math.min(innerHi, xEnd)));
+    rTick.setAttribute("x2", String(Math.min(innerHi, xEnd)));
+    rTick.setAttribute("y1", String(laneY - 4));
+    rTick.setAttribute("y2", String(laneY + 4));
+    rTick.setAttribute("stroke", "rgba(150, 210, 255, 0.92)");
+    rTick.setAttribute("stroke-width", "1.4");
+    g.appendChild(rTick);
     const durLabel = document.createElementNS(NS, "text");
     durLabel.setAttribute("x", String(x));
     durLabel.setAttribute("y", String(y + 38));
@@ -2476,7 +2518,7 @@ function renderSoloTimedPrintStaff(host, notes, opts) {
     durLabel.setAttribute("font-size", "8");
     durLabel.setAttribute("text-anchor", "middle");
     const wLab = notationLabelPt(wMidi, pf);
-    durLabel.textContent = wLab;
+    durLabel.textContent = `${wLab} · ${rhythmToken(dur)}`;
     g.appendChild(durLabel);
   }
 
@@ -2830,6 +2872,14 @@ function ensureBassSampler() {
   return audio.bassSampler;
 }
 
+/** Garante instância dedicada de InstrumentSampler para o solo (lazy). */
+function ensureSoloSampler() {
+  if (audio.soloSampler) return audio.soloSampler;
+  if (!audio.ctx || typeof globalThis.HLInstrumentSampler !== "function") return null;
+  audio.soloSampler = new globalThis.HLInstrumentSampler(audio.ctx);
+  return audio.soloSampler;
+}
+
 /**
  * Sincroniza o sampler do baixo com o `#bassBankInstrument`. Se o valor for
  * "match", o baixo usa o sampler principal — libertamos o dedicado se existia.
@@ -2847,6 +2897,28 @@ function syncBassBankSamplerFromUI() {
     return;
   }
   const s = ensureBassSampler();
+  if (!s) return;
+  globalThis.HLSoundBank.applyInstrumentToSampler(s, choice, {});
+  const style = document.getElementById("playStyle")?.value || "sustain";
+  if (typeof s.setPlaybackStyle === "function") s.setPlaybackStyle(style);
+}
+
+/**
+ * Sincroniza o sampler do solo com o `#soloBankInstrument`. Se o valor for
+ * "match", o solo usa o sampler principal — libertamos o dedicado se existia.
+ * Caso contrário, aplica o banco escolhido ao soloSampler (independente).
+ */
+function syncSoloBankSamplerFromUI() {
+  if (!globalThis.HLSoundBank) return;
+  const choice = document.getElementById("soloBankInstrument")?.value || "match";
+  if (choice === "match") {
+    if (audio.soloSampler) {
+      audio.soloSampler.clearCache?.();
+      audio.soloSampler = null;
+    }
+    return;
+  }
+  const s = ensureSoloSampler();
   if (!s) return;
   globalThis.HLSoundBank.applyInstrumentToSampler(s, choice, {});
   const style = document.getElementById("playStyle")?.value || "sustain";
@@ -2871,6 +2943,17 @@ function currentBankId() {
 function currentBassBankId() {
   const choice = document.getElementById("bassBankInstrument")?.value || "match";
   return choice === "match" ? currentBankId() : choice;
+}
+
+/** Banco efetivo para o solo (ou o principal quando "match"). */
+function currentSoloBankId() {
+  const choice = document.getElementById("soloBankInstrument")?.value || "match";
+  return choice === "match" ? currentBankId() : choice;
+}
+
+/** Sampler efetivo do solo (dedicado quando configurado, senão principal). */
+function currentSoloSampler() {
+  return audio.soloSampler || audio.instrumentSampler;
 }
 
 // Aplica estilo "pluck" se o perfil do instrumento for percussivo
@@ -2903,6 +2986,7 @@ async function preloadSamplerBank() {
   }
   syncBankSamplerFromUI();
   syncBassBankSamplerFromUI();
+  syncSoloBankSamplerFromUI();
   // Carrega apenas os anchors declarados no banco (NOT preloadRange(24,108)).
   // Sem isto, qualquer instrumento não-piano dispara dezenas de 404s e bloqueia
   // o await em Promise.allSettled. O sampler faz pitch-shift entre anchors via
@@ -2920,6 +3004,10 @@ async function preloadSamplerBank() {
   const bassChoice = document.getElementById("bassBankInstrument")?.value || "match";
   if (bassChoice !== "match" && audio.bassSampler) {
     await loadAnchors(audio.bassSampler, bassChoice);
+  }
+  const soloChoice = document.getElementById("soloBankInstrument")?.value || "match";
+  if (soloChoice !== "match" && audio.soloSampler) {
+    await loadAnchors(audio.soloSampler, soloChoice);
   }
 }
 
@@ -3754,24 +3842,25 @@ function refreshSampleExecutionLoop() {
       const bassIvals = progStep ? progSyntheticIvalsForChord(progStep.step.chord) : effectiveStaticHarmonyIvals();
       const bassHarmId = progStep ? "deg1" : harmIdForBass;
       const bassOff = readHarmonyBassSemitoneOffset();
-      const bMidiRaw = nextHarmonyBassMidi(
+      const bMidiPattern = nextHarmonyBassMidi(
         bassTonicPc,
         bassIvals,
         bassHarmId,
         baseOct,
         bassMode,
         sampleBassPatIndex,
-        bassOff
+        0
       );
       sampleBassPatIndex += 1;
-      if (bMidiRaw != null) {
+      if (bMidiPattern != null) {
         // Normalização por instrumento: desloca por oitavas até ao sweet-spot
         // do pack activo (ex.: contrabaixo → MIDI 28–48), aplica gainScale
         // específico e força "pluck" se o perfil for percussivo.
         const normB = globalThis.HLChordNormalizer
-          ? HLChordNormalizer.normalizeSingleNote(bMidiRaw, currentBassBankId())
-          : { midi: bMidiRaw, gainScale: 1, styleOverride: undefined };
-        const bMidi = normB.midi;
+          ? HLChordNormalizer.normalizeSingleNote(bMidiPattern, currentBassBankId())
+          : { midi: bMidiPattern, gainScale: 1, styleOverride: undefined };
+        // A oitava escolhida pelo utilizador deve prevalecer sobre a normalização.
+        const bMidi = clampPlaybackMidiToRange((normB.midi ?? bMidiPattern) + bassOff);
         const bassVol = Number(document.getElementById("harmonyBassVol")?.value ?? 44) / 100;
         const bPeak = Math.max(0.04, Math.min(0.2, bassVol * 0.17 * (normB.gainScale ?? 1)));
         const hStyleRaw0 = effectiveHarmonyExecStyle();
@@ -3835,7 +3924,8 @@ function refreshSampleExecutionLoop() {
     // Progressão: adapta ao acorde do step. Modo estático: tríade I na escala
     // escolhida para o solo (sem precisar da sequência).
     const soloEnabled = document.getElementById("soloEnabled")?.checked;
-    if (soloEnabled && audio.instrumentSampler) {
+    const soloSampler = currentSoloSampler();
+    if (soloEnabled && soloSampler) {
       const ctxSolo = resolveSoloChordAndScale(tcp);
       const chord = ctxSolo.chord;
       if (chord && chord.intervals && chord.rootPc != null) {
@@ -3882,7 +3972,7 @@ function refreshSampleExecutionLoop() {
               soloMidisPlayed.push(midi);
               soloOffs.push(ev.off);
               soloDurs.push(ev.dur);
-              audio.instrumentSampler.playNoteAt(audio.scaleSampleBus, midi, t + ev.off, peak, ev.dur);
+              soloSampler.playNoteAt(audio.scaleSampleBus, midi, t + ev.off, peak, ev.dur);
             }
             if (soloHear) {
               const wLabel = windowBeats > PROG_BEATS_PER_BAR ? `${windowBeats / PROG_BEATS_PER_BAR} comp.` : "1 comp.";
@@ -3945,7 +4035,7 @@ function refreshSampleExecutionLoop() {
 
 function updateSampleControlsEnabled() {
   const sm = document.getElementById("soundMode")?.value === "sample";
-  ["bankInstrument", "bassBankInstrument"].forEach((id) => {
+  ["bankInstrument", "bassBankInstrument", "soloBankInstrument"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.disabled = !sm;
   });
@@ -4177,12 +4267,20 @@ function populateSelects() {
   // permanece (definido no HTML); acrescentamos o resto por baixo.
   const bank = document.getElementById("bankInstrument");
   const bassBank = document.getElementById("bassBankInstrument");
+  const soloBank = document.getElementById("soloBankInstrument");
   if (bank && bassBank) {
     Array.from(bank.children).forEach((child) => {
       // Pula o "Som interno (síntese)" — em baixo faz pouco sentido e complica
       // o contrato "match | instrumento real". Só clona optgroups.
       if (child.tagName === "OPTGROUP") {
         bassBank.appendChild(child.cloneNode(true));
+      }
+    });
+  }
+  if (bank && soloBank) {
+    Array.from(bank.children).forEach((child) => {
+      if (child.tagName === "OPTGROUP") {
+        soloBank.appendChild(child.cloneNode(true));
       }
     });
   }
@@ -4832,12 +4930,12 @@ function predictedExecMidisRestForBeat(virtualBeat, anchorBeat, bassPatAtAnchor,
     const bassHarmId = progStep ? "deg1" : harmIdForBass;
     const bassOff = readHarmonyBassSemitoneOffset();
     const bassStep = bassPatAtAnchor + rel;
-    const bMidiRaw = nextHarmonyBassMidi(bassTonicPc, bassIvals, bassHarmId, baseOct, bassMode, bassStep, bassOff);
-    if (bMidiRaw != null) {
+    const bMidiPattern = nextHarmonyBassMidi(bassTonicPc, bassIvals, bassHarmId, baseOct, bassMode, bassStep, 0);
+    if (bMidiPattern != null) {
       const normB = globalThis.HLChordNormalizer
-        ? HLChordNormalizer.normalizeSingleNote(bMidiRaw, currentBassBankId())
-        : { midi: bMidiRaw, gainScale: 1, styleOverride: undefined };
-      midis.add(clampPlaybackMidiToRange(normB.midi));
+        ? HLChordNormalizer.normalizeSingleNote(bMidiPattern, currentBassBankId())
+        : { midi: bMidiPattern, gainScale: 1, styleOverride: undefined };
+      midis.add(clampPlaybackMidiToRange((normB.midi ?? bMidiPattern) + bassOff));
     }
   }
 
@@ -6120,6 +6218,7 @@ function wireGlobalControls() {
     "soloOctave",
     "soloContextMode",
     "soloScaleType",
+    "soloBankInstrument",
     "soloAlignHarmonyWithScale",
   ].forEach((id) => {
     const el = document.getElementById(id);
@@ -6165,6 +6264,7 @@ function wireGlobalControls() {
     bankInstrument.addEventListener("change", async () => {
       audio.instrumentSampler?.clearCache();
       syncBankSamplerFromUI();
+      syncSoloBankSamplerFromUI();
       await preloadSamplerBank();
       scheduleSyncAudio();
       refreshSampleExecutionLoop();
@@ -6182,6 +6282,15 @@ function wireGlobalControls() {
       refreshSampleExecutionLoop();
     });
   }
+  const soloBankInstrument = document.getElementById("soloBankInstrument");
+  if (soloBankInstrument) {
+    soloBankInstrument.addEventListener("change", async () => {
+      syncSoloBankSamplerFromUI();
+      await preloadSamplerBank();
+      scheduleSyncAudio();
+      refreshSampleExecutionLoop();
+    });
+  }
   ["harmVol", "harmonyBassVol", "droneVol", "slotsVol", "globalBpm", "progVol", "soloVol"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener("input", onContextChange);
@@ -6194,10 +6303,22 @@ function wireGlobalControls() {
     document.querySelectorAll(".js-solo-play").forEach((b) => b.setAttribute("aria-pressed", on ? "true" : "false"));
   }
 
+  function syncHarmonyToggleUi() {
+    const hb = document.getElementById("harmonyBase");
+    if (!hb) return;
+    const on = hb.value !== "off";
+    document.querySelectorAll(".js-harmony-toggle").forEach((btn) => {
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      btn.classList.toggle("btn-primary", on);
+      btn.classList.toggle("btn-outline-stop", !on);
+      if (on) btn.dataset.lastHarmony = hb.value;
+    });
+  }
+
   const onSoloPlay = async () => {
     if (!(await ensureAudioEnabledForAction("tocar solo"))) return;
     const soundMode = document.getElementById("soundMode")?.value ?? "synth";
-    if (soundMode !== "sample" || !audio.instrumentSampler) {
+    if (soundMode !== "sample" || !currentSoloSampler()) {
       alert("O solo improvisado usa o banco de amostras. Confirme o modo Instrumento e que o áudio está activo.");
       return;
     }
@@ -6237,8 +6358,25 @@ function wireGlobalControls() {
     }),
   );
   document.querySelectorAll(".js-solo-stop").forEach((b) => b.addEventListener("click", onSoloStop));
+  document.querySelectorAll(".js-harmony-toggle").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const hb = document.getElementById("harmonyBase");
+      if (!hb) return;
+      if (hb.value !== "off") {
+        btn.dataset.lastHarmony = hb.value;
+        hb.value = "off";
+      } else {
+        const last = btn.dataset.lastHarmony || "deg1";
+        hb.value = last === "off" ? "deg1" : last;
+      }
+      hb.dispatchEvent(new Event("change", { bubbles: true }));
+      syncHarmonyToggleUi();
+    }),
+  );
   const soloEnabledEl = document.getElementById("soloEnabled");
   if (soloEnabledEl) soloEnabledEl.addEventListener("change", syncSoloTransportUi);
+  const harmonyBaseEl = document.getElementById("harmonyBase");
+  if (harmonyBaseEl) harmonyBaseEl.addEventListener("change", syncHarmonyToggleUi);
 
   const soloScenePresetEl = document.getElementById("soloScenePreset");
   if (soloScenePresetEl) {
@@ -6634,6 +6772,7 @@ function wireGlobalControls() {
   setAudioButtonState(false);
   syncTonicSoundButton();
   syncSoloTransportUi();
+  syncHarmonyToggleUi();
   updateSampleControlsEnabled();
 }
 
@@ -6697,6 +6836,7 @@ function applyVisualIcons() {
     [".js-scale-stop", "stop"],
     [".js-solo-play", "mic"],
     [".js-solo-stop", "stop"],
+    [".js-harmony-toggle", "harmony"],
     ["#btnAudio", "volume"],
     ["#btnExport", "save"],
     ["#btnPrintSoloSheets", "print"],

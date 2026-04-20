@@ -532,21 +532,6 @@
           <span>Padrão dos acordes (sequência)</span>
           <select id="progHarmonyStyle" aria-label="Execução dos acordes na progressão"></select>
         </label>
-        <div class="prog-solo-transport" role="group" aria-label="Tocar ou parar o solo sobre esta sequência">
-          <span class="prog-solo-transport-label">Solo</span>
-          <button
-            type="button"
-            class="btn btn-primary btn-compact js-solo-play"
-            title="Liga apenas o solo (áudio em modo amostra). Não ativa nem desativa a sequência."
-            aria-label="Tocar solo sobre a sequência"
-          >▶ Solo</button>
-          <button
-            type="button"
-            class="btn btn-outline-stop btn-compact js-solo-stop"
-            title="Para o solo. A sequência e a harmonia continuam."
-            aria-label="Parar solo"
-          >■</button>
-        </div>
       </div>
     </div>
 
@@ -560,6 +545,13 @@
             title="Liga o solo. Funciona sem sequência se escolher «Solo na tonalidade / escala»."
             aria-label="Tocar solo / improvisação"
           >▶ Tocar solo / improvisação</button>
+          <button
+            type="button"
+            class="btn btn-compact js-harmony-toggle"
+            title="Liga/desliga rapidamente a harmonia base estática"
+            aria-label="Alternar harmonia base"
+            aria-pressed="false"
+          >Harmonia</button>
           <button
             type="button"
             class="btn btn-outline-stop btn-compact js-solo-stop"
@@ -638,6 +630,12 @@
         <label class="field field-check">
           <input type="checkbox" id="soloEnabled" />
           <span>Ativar solo</span>
+        </label>
+        <label class="field field-compact">
+          <span>Instrumento do solo</span>
+          <select id="soloBankInstrument" title="Banco de amostras dedicado ao solo (independente da harmonia)">
+            <option value="match" selected>Igual à harmonia/base</option>
+          </select>
         </label>
         <label class="field solo-flow-card solo-flow-card--pattern">
           <span>2) Padrão melódico (fraseado)</span>
@@ -830,18 +828,6 @@
             class="btn btn-outline-stop btn-sm js-scale-stop"
             title="Interrompe a execução da escala"
           >■ Parar escala</button>
-        </div>
-        <div class="degree-ref-transport degree-ref-transport-solo" role="group" aria-label="Solo e improvisação">
-          <button
-            type="button"
-            class="btn btn-primary btn-sm js-solo-play"
-            title="Liga o solo (modo amostra). Pode usar «Solo na tonalidade» sem sequência — ver painel da sequência de acordes."
-          >▶ Tocar solo / improvisação</button>
-          <button
-            type="button"
-            class="btn btn-outline-stop btn-sm js-solo-stop"
-            title="Para o solo. A harmonia, a escala e os slots continuam."
-          >■ Parar solo</button>
         </div>
       </div>
     </div>
